@@ -1,0 +1,13 @@
+[package]
+name = "notecevia-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "notecevia"
+path = "src/main.rs"
+
+[dependencies]
+notecevia-store = { path = "../store" }
+notecevia-ui = { path = "../ui" }
