@@ -1,6 +1,6 @@
 # Notecevia
 
-本地优先的桌面笔记应用。纯 Rust，单机离线，Markdown 文件即数据，不用 WebView。
+单机离线的桌面笔记应用。纯 Rust，不用 WebView。一个画板就是一个文件，内容是块，媒体嵌在文件里。
 
 ## 规则入口
 
@@ -21,6 +21,31 @@
 - 缺信息先问；预算耗尽就停下，不自行脑补。
 - 完成 = 门禁通过 + 四段汇报（改动／验证／风险／后续）。
 
+## 命令
+
+门禁按下列顺序执行，三条全绿才算通过：
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+- 目录名与包名不同：`crates/core` 的包是 `notecevia-core`，`-p core` 无效。
+- 单包测试：`cargo test -p notecevia-core <用例名>`。
+- 运行：`cargo run -p notecevia-app`，二进制名 `notecevia`。
+- `clippy` 带 `-D warnings`，警告即失败；`fmt` 只检查，改写用 `cargo fmt --all`。
+- workspace 用 `edition = "2024"`，工具链需 Rust 1.85 以上。
+
 ## 结构
 
-`crates/core` 领域逻辑｜`crates/store` 文件与索引｜`crates/ui` 界面｜`crates/app` 入口。
+| 目录 | 包名 | 职责 |
+| --- | --- | --- |
+| `crates/core` | `notecevia-core` | 领域逻辑与用例 |
+| `crates/store` | `notecevia-store` | 文件读写与索引 |
+| `crates/ui` | `notecevia-ui` | 状态映射成界面 |
+| `crates/app` | `notecevia-app` | 组装与入口 |
+
+依赖单向：`app` → `store`、`ui`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
+
+每个 crate 顶部有 `#![forbid(unsafe_code)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。

@@ -1,0 +1,27 @@
+- name: bug
+  color: "d73a4a"
+  description: 行为不对或数据异常
+- name: enhancement
+  color: "a2eeef"
+  description: 新功能或交互改进
+- name: docs
+  color: "0075ca"
+  description: 文档与变更记录
+- name: rules
+  color: "5319e7"
+  description: skill 与项目规则
+- name: format
+  color: "f9d0c4"
+  description: 文件格式与迁移
+- name: ci
+  color: "ededed"
+  description: 构建、门禁与发布流程
+- name: dependencies
+  color: "0366d6"
+  description: 依赖升级
+- name: blocked
+  color: "b60205"
+  description: 等外部条件才能继续
+- name: good first issue
+  color: "7057ff"
+  description: 范围清楚、不需要额外背景

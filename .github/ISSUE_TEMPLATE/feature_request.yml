@@ -1,0 +1,24 @@
+name: 功能建议
+description: 想做的东西、觉得别扭的交互
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: 先看路线图，确认不在「不做」的范围里。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么
+      description: 现在哪里不顺，什么场景下会卡住
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的行为
+  - type: textarea
+    id: boundary
+    attributes:
+      label: 不该做什么
+      description: 明确不做或不该被这个改动影响的部分

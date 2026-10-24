@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 notecevia-core = { path = "../core" }
+egui.workspace = true
+fontique.workspace = true

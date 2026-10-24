@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 门禁
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: 构建
+        run: cargo build --release -p notecevia-app
+      - name: 打包
+        shell: pwsh
+        run: Compress-Archive -Path target/release/notecevia.exe -DestinationPath notecevia-${{ github.ref_name }}-windows.zip
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          files: notecevia-${{ github.ref_name }}-windows.zip
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -9,5 +9,9 @@ name = "notecevia"
 path = "src/main.rs"
 
 [dependencies]
+notecevia-core = { path = "../core" }
 notecevia-store = { path = "../store" }
 notecevia-ui = { path = "../ui" }
+egui.workspace = true
+eframe.workspace = true
+image.workspace = true
