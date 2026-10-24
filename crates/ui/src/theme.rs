@@ -47,25 +47,25 @@ pub const TEXT_COLORS: [Option<[u8; 3]>; 6] = [
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            canvas: Color32::from_rgb(18, 19, 21),
-            block_fill: Color32::from_rgb(32, 34, 38),
-            media_fill: Color32::from_rgb(25, 27, 31),
-            edge: Color32::from_rgb(48, 51, 57),
-            hover_edge: Color32::from_rgb(78, 83, 92),
-            selected_edge: Color32::from_rgb(104, 152, 232),
-            text: Color32::from_rgb(228, 230, 234),
-            muted: Color32::from_rgb(132, 138, 148),
+            canvas: Color32::from_rgb(24, 24, 27),
+            block_fill: Color32::from_rgb(33, 33, 37),
+            media_fill: Color32::from_rgb(43, 43, 48),
+            edge: Color32::from_rgb(52, 52, 58),
+            hover_edge: Color32::from_rgb(78, 78, 86),
+            selected_edge: Color32::from_rgb(168, 139, 250),
+            text: Color32::from_rgb(233, 233, 236),
+            muted: Color32::from_rgb(142, 142, 150),
         }
     } else {
         Palette {
-            canvas: Color32::from_rgb(246, 246, 244),
+            canvas: Color32::from_rgb(242, 242, 244),
             block_fill: Color32::from_rgb(255, 255, 255),
-            media_fill: Color32::from_rgb(238, 238, 235),
-            edge: Color32::from_rgb(219, 219, 214),
-            hover_edge: Color32::from_rgb(186, 186, 180),
-            selected_edge: Color32::from_rgb(40, 96, 200),
-            text: Color32::from_rgb(28, 30, 34),
-            muted: Color32::from_rgb(110, 114, 122),
+            media_fill: Color32::from_rgb(235, 235, 238),
+            edge: Color32::from_rgb(224, 224, 229),
+            hover_edge: Color32::from_rgb(196, 196, 203),
+            selected_edge: Color32::from_rgb(124, 92, 214),
+            text: Color32::from_rgb(28, 28, 31),
+            muted: Color32::from_rgb(110, 110, 118),
         }
     }
 }
