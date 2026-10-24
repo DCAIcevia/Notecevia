@@ -154,6 +154,7 @@ impl Workspace {
             ("y", Value::Float(f64::from(entry.geometry.y))),
             ("w", Value::Float(f64::from(entry.geometry.width))),
             ("h", Value::Float(f64::from(entry.geometry.height))),
+            ("rotation", Value::Float(f64::from(entry.geometry.rotation))),
             ("z_index", Value::Integer(i64::from(entry.z))),
         ])
     }
@@ -222,12 +223,19 @@ fn board_from(value: &Value) -> Result<Board, Error> {
         let Some(kind) = BlockKind::from_number(kind) else {
             continue;
         };
-        let geometry = Geometry::new(
-            float(value, "x")?,
-            float(value, "y")?,
-            float(value, "w")?,
-            float(value, "h")?,
-        );
+        let rotation = value
+            .get("rotation")
+            .and_then(Value::as_float)
+            .unwrap_or(0.0) as f32;
+        let geometry = Geometry {
+            rotation,
+            ..Geometry::new(
+                float(value, "x")?,
+                float(value, "y")?,
+                float(value, "w")?,
+                float(value, "h")?,
+            )
+        };
         if !geometry.is_valid() {
             continue;
         }
@@ -318,6 +326,17 @@ mod tests {
         let root = temp_root("roundtrip");
         let workspace = Workspace::open(&root).expect("open");
         let document = sample();
+        workspace.save(&document).expect("save");
+        assert_eq!(workspace.load().expect("load"), document);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rotation_survives_a_roundtrip() {
+        let root = temp_root("rotation");
+        let workspace = Workspace::open(&root).expect("open");
+        let mut document = sample();
+        document.board.entries[0].geometry.rotation = 0.75;
         workspace.save(&document).expect("save");
         assert_eq!(workspace.load().expect("load"), document);
         let _ = fs::remove_dir_all(&root);

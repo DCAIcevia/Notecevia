@@ -32,6 +32,8 @@ pub struct Geometry {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// 绕块中心顺时针旋转的弧度。
+    pub rotation: f32,
 }
 
 impl Geometry {
@@ -41,13 +43,24 @@ impl Geometry {
             y,
             width,
             height,
+            rotation: 0.0,
         }
+    }
+
+    pub fn size(self) -> (f32, f32) {
+        (self.width, self.height)
+    }
+
+    /// 块中心。旋转绕这里转。
+    pub fn center(self) -> (f32, f32) {
+        (self.x + self.width / 2.0, self.y + self.height / 2.0)
     }
 
     /// 宽高不许是负的或非有限值，读盘时用它兜底。
     pub fn is_valid(self) -> bool {
         self.x.is_finite()
             && self.y.is_finite()
+            && self.rotation.is_finite()
             && self.width.is_finite()
             && self.height.is_finite()
             && self.width > 0.0
