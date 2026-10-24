@@ -43,21 +43,19 @@ description: 提交、拆分改动、写提交信息时加载。含 Conventional
 
 `!` 置于冒号前，或加 `BREAKING CHANGE:` footer。
 
-## 分支
+## 分支与合并（仓库实际规则）
 
-提交前确认远端与目标分支：`git remote -v`、`CONTRIBUTING.md`、`git log --oneline -10`。
+`main` 由仓库 ruleset 保护：禁删除、禁强推、必须走 PR，当前账号无绕过权限。
 
-默认走短分支 + PR，不直接向 `main` 推送。命名 `<type>/<scope>-<主题>`，kebab-case ≤48 字符，存活 ≤3 天。
+分支名禁 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
 
-禁 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
-
-## 合并
-
-合并方式以仓库设置为准。不假设线性历史，不擅自 squash，不改写他人分支历史。
-
-不 force-push。合并后删除自己的分支。
-
-必须开 PR：`feat`、`refactor`、`perf`、依赖与数据格式变更。`rules`、`docs`、`chore`、`ci` 且不碰代码时，是否仍需 PR 按维护者约定。
+- 改动一律走短分支：`<type>/<scope>-<主题>`，kebab-case ≤48 字符，如 `feat/editor-autosave`。直接推 `main` 会被拒。
+- 流程：推分支 → 开 PR → 至少 1 个批准并通过 Code Owner 审核 → 合并。
+- 合并方式只允许 merge commit；squash 与 rebase 被禁用。
+- 推送前确认提交邮箱已关联 GitHub 账号；未归属的提交需要额外批准。
+- 合并不自动删除分支，合并后自己删。
+- 不 force-push，不改写他人分支历史。
+- PR 会触发 Copilot 审查；合并前确认 CodeQL 与代码质量检查通过。
 
 ## 版本
 
