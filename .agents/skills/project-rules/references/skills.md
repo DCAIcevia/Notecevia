@@ -1,29 +1,31 @@
 # Skill 管理
 
-## 判据
+## 先看 skill-creator
 
-新增前确认现有 skill 是否已覆盖。命名 kebab-case，目录名与 `name` 一致。
+新建或修改 skill 前先加载 `skill-creator`（Anthropic 官方，Apache-2.0，原文在 `.agents/skills/skill-creator/`）。它讲通用方法：结构、渐进披露、描述怎么写、怎么用测试提示验证。
 
-`description` ≤60 字，写清何时加载与内容。新增、改名、删除必须同次更新 `AGENTS.md` 加载表。
+本文件只补本项目特有的约束，通用方法不重复。
 
-## 渐进式披露
+## 结构
 
-单文件 ≤80 行。超过 30 行且含两个以上主题时拆分：SKILL.md 只留入口、索引表与硬约束（≤30 行），正文按主题移入同目录 `references/`。
+一个 skill 一个主题。目录名与 frontmatter 的 `name` 一致，kebab-case。SKILL.md 是入口：说明它做什么、什么时候用、接下来读哪个文件。细节放同目录 `references/`，体积大的清单类内容才值得单独成文件。
 
-索引表三列：主题、文件、何时读。一个主题一个文件，文件名 kebab-case，单个 reference ≤80 行。
+上游引入的 skill 保持原样，不套用本项目的行数建议。
 
-单一主题的 skill 不拆，多一次读取没有收益。reference 之间不互相引用，不为凑数拆分。
+## 描述决定它会不会被用上
 
-## 创建基线
+description 是唯一常驻上下文、也是触发的唯一依据。模型天然倾向于漏触发，所以描述要写清"做什么 + 什么时候用"，并列出用户可能说的场景词。
 
-新建或修改 skill 前先加载 `skill-creator`（上游 Anthropic 出品，Apache-2.0，原文保留在 `.agents/skills/skill-creator/`）。
+写成两句：第一句说能力，第二句说触发条件，必要时点明显得相关但容易漏掉的情况。
 
-它给出的结构是 SKILL.md + 可选 `references/`、`scripts/`、`assets/`；三级加载：元数据常驻、正文触发时加载、资源按需读取。
+## 规模
 
-上游文件保持原样，不套用本项目的行数上限。本项目自研 skill 仍受 80 行约束。
+SKILL.md 控制在 120 行以内；超过就把细节移进 references/，并在入口写清"什么时候读哪个文件"。单个 reference 不超过 200 行，超过就加目录。行数是控制上下文成本的提醒，不是审美要求。
 
-## 流程
+## 改 skill 要同步
 
-写 description 与正文，更新索引表，验证 `skill` 工具能按名字加载且内容与 description 一致。
+新增、改名、删除 skill，必须在同一次改动里更新 `AGENTS.md` 的加载表，否则它永远不会被加载。改了 skill 的行为，也要检查 description 是否还准确。
 
-提交类型 `rules`，scope `skills`。
+## 验证
+
+写完后用 `skill` 工具按名字加载一次，确认 frontmatter 能解析、正文与描述一致。结果可验证的 skill，再准备 2-3 条真实提示跑一遍，看它是否被正确触发、产出是否符合预期。

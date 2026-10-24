@@ -1,21 +1,19 @@
 ---
 name: project-rules
-description: 项目总规则入口。任何任务开始前加载。按需读同目录 references/ 下的开工、文档、代码、skill 四份细则。
+description: 本项目的总规则入口，每次任务开始前先加载。它规定开工前怎么问、读什么、改到什么程度算完成，并把写文档、写 Rust、改 skill 三类细则放在同目录 references/ 里按需读取。只要在 Notecevia 仓库里动手改东西，就先打开它，哪怕任务看起来很小。
 ---
 
 # 项目规则
 
-开工先声明四行：任务与完成条件、计划读的文件（≤5）、验证命令、可逆假设。
+Notecevia 是本地优先的桌面笔记应用：笔记就是磁盘上的 Markdown 文件，应用只负责读写与检索。规则都从这条定位长出来——数据不能因为工具出错而丢，界面不能抢内容的风头，规则要能让未来的人或模型读懂并执行。
 
-| 主题 | 文件 | 何时读 |
+开工前先写四行声明：任务与完成条件、计划读的文件、验证方式、可逆假设。写不出来，说明任务还没想清楚。
+
+| 要做的事 | 读哪个文件 | 为什么 |
 | --- | --- | --- |
-| 开工与预算 | `references/workflow.md` | 每次任务开始 |
-| 文档与禁用词 | `references/docs.md` | 写 README、skill、注释、说明文字 |
-| 代码 | `references/code.md` | 写或改 Rust 代码 |
-| skill 管理 | `references/skills.md` | 新增或修改 skill |
+| 任何任务 | `references/workflow.md` | 读取预算与提问边界，避免过度探索 |
+| 写说明、注释、README、skill | `references/docs.md` | 文档只写事实，不写历史与口语 |
+| 写或改 Rust | `references/code.md` | 分层、错误处理、门禁与性能预算 |
+| 新建或改 skill | `references/skills.md` | skill 的结构与触发描述写法 |
 
-细则未读时也必须遵守三条：
-
-- 该加载的 skill 没加载就动手，视为违规。
-- 不改功能范围、不加依赖、不换 UI 方向，先问。
-- 未验证不得称完成。
+三条底线，细则没读也要守：该加载的 skill 没加载不动手；改功能范围、加依赖、换 UI 方向先问；没验证不说完成。
