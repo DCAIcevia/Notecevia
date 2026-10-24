@@ -5,7 +5,7 @@
 //! 绘制走屏幕坐标而不是整层变换：文本按缩放后的字号重新排版，放大后仍然清晰。
 //! 代价是每帧要重排可见文字，所以绘制与交互都先按视口裁剪。
 
-use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 use notecevia_core::board::{Document, Geometry};
 
@@ -14,8 +14,8 @@ use crate::{chrome, strings, theme};
 /// 缩放范围。再小看不清，再大失去意义。
 const MIN_ZOOM: f32 = 0.15;
 const MAX_ZOOM: f32 = 6.0;
-/// 新块的默认世界尺寸。
-const NEW_TEXT_SIZE: Vec2 = Vec2::new(320.0, 120.0);
+/// 新块的默认换行宽度。块的宽度就是这个：字到这儿换行。
+const NEW_TEXT_WIDTH: f32 = 320.0;
 /// 视图复位后的状态。
 const DEFAULT_ORIGIN: Pos2 = Pos2::new(160.0, 140.0);
 const DEFAULT_ZOOM: f32 = 1.0;
@@ -56,7 +56,6 @@ pub struct BoardApp {
     /// 刚进入编辑的那一块，下一帧要把焦点交给编辑框。
     pending_focus: Option<u64>,
     selected: Option<u64>,
-    hovered: Option<u64>,
     status: Option<String>,
     fps: f32,
     dirty: bool,
@@ -70,7 +69,6 @@ impl BoardApp {
             editing: None,
             pending_focus: None,
             selected: None,
-            hovered: None,
             status: None,
             fps: 0.0,
             dirty: false,
@@ -144,9 +142,13 @@ impl BoardApp {
             self.view.origin += background.drag_delta();
         }
 
+        // 明确点一下才算写完：这一下既结束编辑，也把刚写的东西追认成一块。
         if background.clicked() {
-            self.selected = None;
-            self.editing = None;
+            if self.editing.is_some() {
+                self.commit_editing();
+            } else {
+                self.selected = None;
+            }
         }
 
         if background.double_clicked()
@@ -156,13 +158,12 @@ impl BoardApp {
             let block = self.document.add_text(Geometry::new(
                 world.x,
                 world.y,
-                NEW_TEXT_SIZE.x,
-                NEW_TEXT_SIZE.y,
+                NEW_TEXT_WIDTH,
+                theme::MIN_BLOCK_HEIGHT,
             ));
-            self.selected = Some(block);
+            // 这时候还没有真正的块：不给边框、不算选中，用户只是在这块地方开始写字。
             self.editing = Some(block);
             self.pending_focus = Some(block);
-            self.dirty = true;
         }
 
         if ui.rect_contains_pointer(rect) {
@@ -187,7 +188,7 @@ impl BoardApp {
         });
 
         if escape {
-            self.editing = None;
+            self.commit_editing();
         }
         if delete
             && !ui.ctx().egui_wants_keyboard_input()
@@ -202,6 +203,21 @@ impl BoardApp {
         }
         if reset_view {
             self.view = View::restored();
+        }
+    }
+
+    /// 结束编辑：有字就追认成一块并选中它，没字就把这个空块丢掉。
+    fn commit_editing(&mut self) {
+        let Some(block) = self.editing.take() else {
+            return;
+        };
+        self.pending_focus = None;
+        if self.document.text_of(block).trim().is_empty() {
+            self.document.remove_block(block);
+            self.selected = None;
+        } else {
+            self.selected = Some(block);
+            self.dirty = true;
         }
     }
 
@@ -226,11 +242,14 @@ impl BoardApp {
             responses.push((index, ui.interact(screen, id, Sense::click_and_drag())));
         }
 
-        self.hovered = None;
         for (index, response) in responses {
             let block = self.document.board.entries[index].id;
-            if response.hovered() || response.dragged() {
-                self.hovered = Some(block);
+            // 没有边框可看，指针形状就是唯一提示：指到字上变成可拖的样子。
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
             if response.dragged() && self.editing != Some(block) {
                 let delta = response.drag_delta() / self.view.zoom;
@@ -239,6 +258,7 @@ impl BoardApp {
                 self.dirty = true;
             }
             if response.clicked() {
+                self.commit_editing();
                 self.selected = Some(block);
             }
             if response.double_clicked() {
@@ -251,45 +271,50 @@ impl BoardApp {
 
     // ---- 绘制 ----
 
-    fn paint_blocks(&self, ui: &egui::Ui, palette: &theme::Palette, clip: Rect) {
+    fn paint_blocks(&mut self, ui: &egui::Ui, palette: &theme::Palette, clip: Rect) {
         let painter = ui.painter().with_clip_rect(clip);
         let zoom = self.view.zoom;
 
-        for entry in &self.document.board.entries {
-            let screen = self.view.rect_to_screen(rect_of(entry.geometry));
+        for index in 0..self.document.board.entries.len() {
+            let id = self.document.board.entries[index].id;
+            let screen = self
+                .view
+                .rect_to_screen(rect_of(self.document.board.entries[index].geometry));
             if !clip.intersects(screen) {
                 continue;
             }
 
-            let selected = self.selected == Some(entry.id);
-            let hovered = self.hovered == Some(entry.id);
-            let edge = if selected {
-                palette.selected_edge
-            } else if hovered {
-                palette.hover_edge
-            } else {
-                palette.edge
-            };
-            let width = if selected {
-                theme::SELECTED_EDGE_WIDTH
-            } else {
-                theme::EDGE_WIDTH
-            } * zoom;
-            let radius = CornerRadius::same((theme::BLOCK_RADIUS * zoom).round() as u8);
-
-            painter.rect(
-                screen,
-                radius,
-                palette.block_fill,
-                Stroke::new(width, edge),
-                StrokeKind::Inside,
+            let editing = self.editing == Some(id);
+            let size = self.block_size(id);
+            let color = self.block_color(id, palette);
+            let font = FontId::proportional((size * zoom).max(4.0));
+            let galley = painter.layout(
+                self.document.text_of(id).to_owned(),
+                font,
+                color,
+                screen.width(),
             );
 
-            if self.editing != Some(entry.id) {
-                let text = self.document.text_of(entry.id);
-                let size = self.block_size(entry.id);
-                let color = self.block_color(entry.id, palette);
-                paint_text(&painter, screen, text, zoom, size, color);
+            // 块高由文字算出来。文件里存的高度只是提示，视图这边永远以文字为准，
+            // 所以改字号、改内容之后框不会跟字对不上。
+            let height = galley.size().y.max(theme::MIN_BLOCK_HEIGHT);
+            if (self.document.board.entries[index].geometry.height - height).abs() > 0.5 {
+                self.document.board.entries[index].geometry.height = height;
+            }
+            let block = Rect::from_min_size(screen.min, Vec2::new(screen.width(), height));
+
+            // 块平时跟背景没有区别：不填充、不描边，只有字。确认并选中才画虚线框。
+            if self.selected == Some(id) {
+                dashed_outline(
+                    &painter,
+                    block,
+                    Stroke::new(theme::EDGE_WIDTH * zoom, palette.selected_edge),
+                    zoom,
+                );
+            }
+
+            if !editing {
+                painter.galley(screen.min, galley, color);
             }
         }
     }
@@ -316,19 +341,17 @@ impl BoardApp {
         let font = FontId::proportional((self.block_size(block) * zoom).max(4.0));
         let text_color = self.block_color(block, palette);
 
-        // 编辑框按矩形定位，不用 TextEdit 自己的内边距：静态文字是 galley 偏移，
-        // 两条路径必须从「块左上角 + 内边距」这同一个点开始，否则一进编辑文字就跳。
-        let inner = screen.shrink(theme::BLOCK_PAD * zoom);
-
+        // 编辑框和静态文字用同一个矩形、同样没有填充：进编辑的时候字不会跳。
+        let inner = screen;
         let editor_id = ui.scope_id().with(("editor", block));
 
         let response = {
             let text = &mut self.document.text_mut(block).text;
             let editor = egui::TextEdit::multiline(text)
                 .id(editor_id)
-                .font(font)
+                .font(font.clone())
                 .text_color(text_color)
-                .background_color(palette.block_fill)
+                .background_color(Color32::TRANSPARENT)
                 .margin(egui::Margin::ZERO)
                 .frame(egui::Frame::NONE)
                 .desired_width(inner.width())
@@ -466,6 +489,26 @@ fn paint_chip(
     painter.galley(rect.min, galley, palette.muted);
 }
 
+/// 虚线框。确认过的块才有，没有填充，只标边界。
+fn dashed_outline(painter: &egui::Painter, rect: Rect, stroke: Stroke, zoom: f32) {
+    let rect = rect.shrink(stroke.width / 2.0);
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+        rect.left_top(),
+    ];
+    for pair in corners.windows(2) {
+        painter.extend(egui::Shape::dashed_line(
+            pair,
+            stroke,
+            4.0 * zoom,
+            3.0 * zoom,
+        ));
+    }
+}
+
 fn rect_of(geometry: Geometry) -> Rect {
     Rect::from_min_size(
         Pos2::new(geometry.x, geometry.y),
@@ -480,24 +523,6 @@ fn translate(geometry: Geometry, delta: Vec2) -> Geometry {
         geometry.width,
         geometry.height,
     )
-}
-
-fn paint_text(
-    painter: &egui::Painter,
-    screen: Rect,
-    text: &str,
-    zoom: f32,
-    size: f32,
-    color: Color32,
-) {
-    if text.is_empty() {
-        return;
-    }
-    let font = FontId::proportional((size * zoom).max(4.0));
-    let pad = theme::BLOCK_PAD * zoom;
-    let wrap = (screen.width() - 2.0 * pad).max(8.0);
-    let galley = painter.layout(text.to_owned(), font, color, wrap);
-    painter.galley(screen.min + Vec2::splat(pad), galley, color);
 }
 
 #[cfg(test)]
@@ -562,21 +587,37 @@ mod tests {
         }
     }
 
+    /// 双击空白，开始写字。返回时处于编辑状态。
+    fn begin_typing(ctx: &egui::Context, app: &mut BoardApp, pointer: Pos2) {
+        frame(
+            ctx,
+            app,
+            0.0,
+            vec![egui::Event::PointerMoved(pointer), click(pointer, true)],
+        );
+        frame(ctx, app, 0.05, vec![click(pointer, false)]);
+        frame(ctx, app, 0.10, vec![click(pointer, true)]);
+        frame(ctx, app, 0.15, vec![click(pointer, false)]);
+    }
+
+    /// 在别处点一下：结束编辑并确认这一块。
+    fn click_elsewhere(ctx: &egui::Context, app: &mut BoardApp, away: Pos2) {
+        frame(
+            ctx,
+            app,
+            0.30,
+            vec![egui::Event::PointerMoved(away), click(away, true)],
+        );
+        frame(ctx, app, 0.35, vec![click(away, false)]);
+    }
+
     #[test]
     fn double_click_makes_a_block_that_takes_typing() {
         let ctx = egui::Context::default();
         let mut app = BoardApp::new(Document::new("测试画板"));
         let pointer = Pos2::new(400.0, 300.0);
 
-        frame(
-            &ctx,
-            &mut app,
-            0.0,
-            vec![egui::Event::PointerMoved(pointer), click(pointer, true)],
-        );
-        frame(&ctx, &mut app, 0.05, vec![click(pointer, false)]);
-        frame(&ctx, &mut app, 0.10, vec![click(pointer, true)]);
-        frame(&ctx, &mut app, 0.15, vec![click(pointer, false)]);
+        begin_typing(&ctx, &mut app, pointer);
         assert_eq!(app.document().board.entries.len(), 1);
 
         frame(
@@ -586,6 +627,43 @@ mod tests {
             vec![egui::Event::Text("h".to_owned())],
         );
         assert_eq!(app.document().text_of(1), "h");
+    }
+
+    #[test]
+    fn clicking_elsewhere_commits_the_block_and_selects_it() {
+        let ctx = egui::Context::default();
+        let mut app = BoardApp::new(Document::new("测试画板"));
+        let pointer = Pos2::new(400.0, 300.0);
+
+        begin_typing(&ctx, &mut app, pointer);
+        // 还没确认：这块既没有虚线框，也不算被选中。
+        assert!(app.selected.is_none());
+
+        frame(
+            &ctx,
+            &mut app,
+            0.20,
+            vec![egui::Event::Text("你好".to_owned())],
+        );
+        click_elsewhere(&ctx, &mut app, Pos2::new(1000.0, 700.0));
+
+        assert!(app.editing.is_none());
+        assert_eq!(app.selected, Some(1));
+        assert_eq!(app.document().text_of(1), "你好");
+        assert_eq!(app.document().board.entries.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_block_disappears_when_committed() {
+        let ctx = egui::Context::default();
+        let mut app = BoardApp::new(Document::new("测试画板"));
+
+        begin_typing(&ctx, &mut app, Pos2::new(400.0, 300.0));
+        assert_eq!(app.document().board.entries.len(), 1);
+        click_elsewhere(&ctx, &mut app, Pos2::new(1000.0, 700.0));
+
+        assert!(app.document().board.entries.is_empty());
+        assert!(app.selected.is_none());
     }
 
     #[test]

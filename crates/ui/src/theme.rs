@@ -19,10 +19,10 @@ pub struct Palette {
 /// 世界坐标里的尺寸。绘制时乘以缩放，画面上才不会随窗口变大变小。
 pub const BLOCK_FONT: f32 = 15.0;
 pub const SMALL_FONT: f32 = 12.0;
-pub const BLOCK_PAD: f32 = 12.0;
+/// 块的最小高度，保证一个字也有一块地。
+pub const MIN_BLOCK_HEIGHT: f32 = 24.0;
 pub const BLOCK_RADIUS: f32 = 8.0;
 pub const EDGE_WIDTH: f32 = 1.0;
-pub const SELECTED_EDGE_WIDTH: f32 = 2.0;
 pub const HINT_INSET: f32 = 12.0;
 pub const HINT_PAD: f32 = 6.0;
 
