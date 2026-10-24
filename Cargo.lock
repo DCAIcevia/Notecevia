@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "notecevia-app"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "eframe",
  "egui",
@@ -1918,11 +1918,11 @@ dependencies = [
 
 [[package]]
 name = "notecevia-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 
 [[package]]
 name = "notecevia-store"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "notecevia-core",
  "thiserror 2.0.21",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "notecevia-ui"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "egui",
  "fontique",
