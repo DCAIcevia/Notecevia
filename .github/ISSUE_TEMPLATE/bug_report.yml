@@ -1,0 +1,38 @@
+name: 问题报告
+description: 有东西不对、程序崩溃或数据异常
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 报告前先看 changelog 里的「已知问题」，那里列着还没修的。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 窗口标题里的版本号，或是提交号
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动开始的完整操作顺序，能稳定复现的最小步骤
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 现象、报错文字、是否丢数据
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与显示缩放
+      description: 例如 Windows 11 24H2，显示缩放 125%
