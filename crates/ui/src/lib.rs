@@ -4,6 +4,7 @@
 
 pub mod board;
 pub mod chrome;
+pub mod fonts;
 pub mod strings;
 pub mod theme;
 

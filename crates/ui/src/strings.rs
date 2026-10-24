@@ -6,6 +6,10 @@
 pub const UNSAVED: &str = "未保存";
 pub const SAVED: &str = "已保存";
 
+/// 字体列表里的「默认」与过滤框提示。
+pub const FONT_DEFAULT: &str = "默认字体";
+pub const FONT_FILTER: &str = "筛选字体";
+
 /// 调色板里的「跟随主题」。
 pub const COLOUR_AUTO: &str = "自动";
 

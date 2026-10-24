@@ -199,6 +199,10 @@ pub struct BoardApp {
     selected: Option<u64>,
     /// 正在拖的那块，以及拖的是移动、拉伸还是旋转。
     drag: Option<(u64, Grab)>,
+    /// 系统字体，枚举要几百毫秒，所以第一次用到才建。
+    fonts: Option<crate::fonts::FontLibrary>,
+    installed_fonts: std::collections::HashSet<String>,
+    font_filter: String,
     status: Option<String>,
     fps: f32,
     dirty: bool,
@@ -213,6 +217,9 @@ impl BoardApp {
             pending_focus: None,
             selected: None,
             drag: None,
+            fonts: None,
+            installed_fonts: std::collections::HashSet::new(),
+            font_filter: String::new(),
             status: None,
             fps: 0.0,
             dirty: false,
@@ -272,6 +279,7 @@ impl BoardApp {
         };
         chrome::top_bar(ui, &palette, top, &self.document.board.title, &state);
 
+        self.ensure_fonts(ui.ctx());
         self.interact_blocks(ui, clip);
         self.paint_blocks(ui, &palette, clip);
         self.edit_text(ui, &palette);
@@ -493,7 +501,7 @@ impl BoardApp {
             };
             let size = self.block_size(id);
             let color = self.block_color(id, palette);
-            let font = FontId::proportional((size * zoom).max(4.0));
+            let font = FontId::new((size * zoom).max(4.0), self.family_of(id));
             let galley = painter.layout(
                 self.document.text_of(id).to_owned(),
                 font,
@@ -561,7 +569,10 @@ impl BoardApp {
         let screen = self
             .view
             .rect_to_screen(rect_of(self.document.board.entries[index].geometry));
-        let font = FontId::proportional((self.block_size(block) * zoom).max(4.0));
+        let font = FontId::new(
+            (self.block_size(block) * zoom).max(4.0),
+            self.family_of(block),
+        );
         let text_color = self.block_color(block, palette);
 
         // 编辑框和静态文字用同一个矩形、同样没有填充：进编辑的时候字不会跳。
@@ -666,6 +677,58 @@ impl BoardApp {
         palette.text
     }
 
+    /// 一块用的字体族：设过且装上了才按名字用，否则回落到主题默认。
+    fn family_of(&self, id: u64) -> egui::FontFamily {
+        let name = self
+            .document
+            .texts
+            .get(&id)
+            .and_then(|block| block.font.clone());
+        match name {
+            Some(name) if self.installed_fonts.contains(&name) => {
+                egui::FontFamily::Name(name.as_str().into())
+            }
+            _ => egui::FontFamily::Proportional,
+        }
+    }
+
+    /// 文档里用到、但还没装进 egui 的字体族，这一帧补装。
+    fn ensure_fonts(&mut self, context: &egui::Context) {
+        let mut missing: Vec<String> = self
+            .document
+            .board
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                self.document
+                    .texts
+                    .get(&entry.id)
+                    .and_then(|block| block.font.clone())
+            })
+            .filter(|name| !self.installed_fonts.contains(name))
+            .collect();
+        missing.sort();
+        missing.dedup();
+        if missing.is_empty() {
+            return;
+        }
+
+        if self.fonts.is_none() {
+            self.fonts = Some(crate::fonts::FontLibrary::load());
+        }
+        let Some(library) = &self.fonts else {
+            return;
+        };
+        for name in missing {
+            if let Some(index) = library.index_of(&name) {
+                library.install(context, index);
+            }
+            // 装上了、或者这台机器没这个字体，都记下来，别每帧重试。
+            self.installed_fonts.insert(name);
+        }
+        context.request_repaint();
+    }
+
     /// 选中一块时在它上方浮出格式操作条。编辑文字时不出现，免得抢焦点。
     fn style_toolbar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
         if self.editing.is_some() {
@@ -690,7 +753,12 @@ impl BoardApp {
         let Some(block) = self.document.texts.get_mut(&selected) else {
             return;
         };
-        if chrome::style_toolbar(ui, palette, screen, block) {
+        let mut picker = chrome::FontPicker {
+            library: &mut self.fonts,
+            installed: &mut self.installed_fonts,
+            filter: &mut self.font_filter,
+        };
+        if chrome::style_toolbar(ui, palette, screen, block, &mut picker) {
             self.dirty = true;
         }
     }

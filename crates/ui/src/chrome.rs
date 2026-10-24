@@ -5,9 +5,11 @@
 
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
+use std::collections::HashSet;
+
 use notecevia_core::board::TextBlock;
 
-use crate::{strings, theme};
+use crate::{fonts::FontLibrary, strings, theme};
 
 /// 顶栏高度。画布从这条线以下开始。
 pub const TOP_BAR_HEIGHT: f32 = 40.0;
@@ -16,6 +18,7 @@ const TOOLBAR_HEIGHT: f32 = 32.0;
 const TOOLBAR_GAP: f32 = 8.0;
 const BUTTON: f32 = 24.0;
 const COLOR_BUTTON: f32 = 26.0;
+const FONT_BUTTON: f32 = 76.0;
 const GAP: f32 = 6.0;
 const PAD: f32 = 8.0;
 const RADIUS: u8 = 6;
@@ -48,14 +51,22 @@ pub fn top_bar(ui: &egui::Ui, palette: &theme::Palette, rect: Rect, title: &str,
     }
 }
 
+/// 选字体要用的状态，由界面持有。
+pub struct FontPicker<'a> {
+    pub library: &'a mut Option<FontLibrary>,
+    pub installed: &'a mut HashSet<String>,
+    pub filter: &'a mut String,
+}
+
 /// 选中块上方的格式操作条。返回这次有没有改动样式。
 pub fn style_toolbar(
     ui: &egui::Ui,
     palette: &theme::Palette,
     block: Rect,
     style: &mut TextBlock,
+    picker: &mut FontPicker<'_>,
 ) -> bool {
-    let width = PAD * 2.0 + BUTTON * 2.0 + GAP * 2.0 + COLOR_BUTTON * 2.0;
+    let width = PAD * 2.0 + BUTTON * 2.0 + GAP * 2.0 + COLOR_BUTTON * 2.0 + GAP + FONT_BUTTON;
     let area = ui.clip_rect();
     // 默认浮在块上方；上方放不下就挪到块下方，不躲到屏幕外。
     let above = block.top() - TOOLBAR_GAP - TOOLBAR_HEIGHT;
@@ -134,8 +145,89 @@ pub fn style_toolbar(
         response.hovered(),
     );
     changed |= colour_popup(palette, &response, &mut style.background);
+    x += COLOR_BUTTON;
+
+    // 字体族。列表是系统里已经装好的那些，第一次打开才现枚举。
+    x += GAP;
+    let button = Rect::from_min_size(
+        Pos2::new(x, middle - BUTTON / 2.0),
+        Vec2::new(FONT_BUTTON, BUTTON),
+    );
+    let response = ui.interact(button, ui.scope_id().with("font-family"), Sense::click());
+    if response.clicked() && picker.library.is_none() {
+        // 枚举要几百毫秒，只在这一下花，不放在启动路径上。
+        *picker.library = Some(FontLibrary::load());
+    }
+    if response.hovered() {
+        painter.rect_filled(button, CornerRadius::same(RADIUS), palette.media_fill);
+    }
+    let label = style.font.as_deref().unwrap_or(strings::FONT_DEFAULT);
+    painter.text(
+        button.center(),
+        Align2::CENTER_CENTER,
+        elide(label, 8),
+        FontId::proportional(theme::SMALL_FONT),
+        palette.text,
+    );
+    changed |= font_popup(&response, style, picker);
 
     changed
+}
+
+/// 字体列表：默认 + 系统里装好的字体族，带一个过滤框。
+fn font_popup(button: &egui::Response, style: &mut TextBlock, picker: &mut FontPicker<'_>) -> bool {
+    let mut changed = false;
+    egui::Popup::from_toggle_button_response(button)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(240.0);
+            if ui
+                .selectable_label(style.font.is_none(), strings::FONT_DEFAULT)
+                .clicked()
+            {
+                style.font = None;
+                changed = true;
+                ui.close();
+            }
+
+            ui.add(egui::TextEdit::singleline(picker.filter).hint_text(strings::FONT_FILTER));
+            let FontPicker {
+                library,
+                installed,
+                filter,
+            } = picker;
+            let Some(library) = library.as_ref() else {
+                return;
+            };
+            let needle = filter.to_lowercase();
+            egui::ScrollArea::vertical()
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    for (index, name) in library.names().iter().enumerate() {
+                        if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
+                            continue;
+                        }
+                        if ui.selectable_label(false, name).clicked()
+                            && library.install(ui.ctx(), index).is_some()
+                        {
+                            installed.insert(name.clone());
+                            style.font = Some(name.clone());
+                            changed = true;
+                            ui.close();
+                        }
+                    }
+                });
+        });
+    changed
+}
+
+/// 按钮上放不下整个字体名，截断加省略号。
+fn elide(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().take(limit.saturating_sub(1)).collect();
+    format!("{kept}…")
 }
 
 /// 调色板：自动（跟随主题）、一排常见色，再加一个能自己调的取色器。
