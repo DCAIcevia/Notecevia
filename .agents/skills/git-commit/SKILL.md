@@ -5,7 +5,7 @@ description: 提交、拆分改动、写提交信息时加载。含 Conventional
 
 # Git 提交
 
-基线：Conventional Commits 1.0.0，模板取自 awesome-copilot 的 git-commit（MIT）。仓库自身规则优先于本 skill。
+基线：Conventional Commits 1.0.0，模板取自 awesome-copilot 的 git-commit（MIT）。仓库属于他人维护，仓库规则、维护者约定与分支保护优先于本 skill。
 
 ## 提交前
 
@@ -45,15 +45,19 @@ description: 提交、拆分改动、写提交信息时加载。含 Conventional
 
 ## 分支
 
-主干式，`main` 随时可构建。可直接进 `main`：规则与 skill 修订、单文件 ≤20 行且无行为变化、构建配置微调。其余走短分支，命名 `<type>/<scope>-<主题>`，kebab-case ≤48 字符，存活 ≤3 天。
+提交前确认远端与目标分支：`git remote -v`、`CONTRIBUTING.md`、`git log --oneline -10`。
+
+默认走短分支 + PR，不直接向 `main` 推送。命名 `<type>/<scope>-<主题>`，kebab-case ≤48 字符，存活 ≤3 天。
 
 禁 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
 
 ## 合并
 
-squash merge 进 `main`，保持线性；禁 merge commit；禁 force-push `main`。
+合并方式以仓库设置为准。不假设线性历史，不擅自 squash，不改写他人分支历史。
 
-必须开 PR：`feat`、`refactor`、`perf`、依赖与数据格式变更。可直接合并：`rules`、`docs`、`chore`、`ci` 且不碰代码。
+不 force-push。合并后删除自己的分支。
+
+必须开 PR：`feat`、`refactor`、`perf`、依赖与数据格式变更。`rules`、`docs`、`chore`、`ci` 且不碰代码时，是否仍需 PR 按维护者约定。
 
 ## 版本
 
