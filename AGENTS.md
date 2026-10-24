@@ -11,6 +11,7 @@
 | 任何任务开始 | `skill project-rules` |
 | 提交、分支、发布 | `skill git-commit` |
 | 改界面 | `skill ui-design` |
+| 新建或修改 skill | `skill skill-creator` |
 
 ## 红线
 

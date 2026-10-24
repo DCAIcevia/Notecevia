@@ -14,6 +14,14 @@
 
 单一主题的 skill 不拆，多一次读取没有收益。reference 之间不互相引用，不为凑数拆分。
 
+## 创建基线
+
+新建或修改 skill 前先加载 `skill-creator`（上游 Anthropic 出品，Apache-2.0，原文保留在 `.agents/skills/skill-creator/`）。
+
+它给出的结构是 SKILL.md + 可选 `references/`、`scripts/`、`assets/`；三级加载：元数据常驻、正文触发时加载、资源按需读取。
+
+上游文件保持原样，不套用本项目的行数上限。本项目自研 skill 仍受 80 行约束。
+
 ## 流程
 
 写 description 与正文，更新索引表，验证 `skill` 工具能按名字加载且内容与 description 一致。
