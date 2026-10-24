@@ -20,6 +20,147 @@ const NEW_TEXT_WIDTH: f32 = 320.0;
 const DEFAULT_ORIGIN: Pos2 = Pos2::new(160.0, 140.0);
 const DEFAULT_ZOOM: f32 = 1.0;
 
+/// 鼠标落在块上时要做的事。位置决定动作，不摆按钮。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Grab {
+    Move,
+    Rotate,
+    Horizontal { left: bool },
+    Vertical { top: bool },
+    Corner { left: bool, top: bool },
+}
+
+/// 由块本地坐标判断这次能做什么。本地坐标以块中心为原点、已经把旋转抵消掉。
+fn grab_at(local: Vec2, half: Vec2) -> Option<Grab> {
+    let x = local.x.abs();
+    let y = local.y.abs();
+    let left = local.x < 0.0;
+    let top = local.y < 0.0;
+    let near_x = x >= half.x - theme::GRAB_EDGE;
+    let near_y = y >= half.y - theme::GRAB_EDGE;
+    let outside_x = x > half.x + theme::GRAB_EDGE;
+    let outside_y = y > half.y + theme::GRAB_EDGE;
+
+    // 角外面那一圈是旋转，跟 PS 一样：贴着角往外拐就是转它。
+    if outside_x && outside_y && x <= half.x + theme::GRAB_BAND && y <= half.y + theme::GRAB_BAND {
+        return Some(Grab::Rotate);
+    }
+    if outside_x || outside_y {
+        return None;
+    }
+    if near_x && near_y {
+        return Some(Grab::Corner { left, top });
+    }
+    if near_x {
+        return Some(Grab::Horizontal { left });
+    }
+    if near_y {
+        return Some(Grab::Vertical { top });
+    }
+    Some(Grab::Move)
+}
+
+fn rotate(vector: Vec2, angle: f32) -> Vec2 {
+    let (sin, cos) = angle.sin_cos();
+    Vec2::new(
+        vector.x * cos - vector.y * sin,
+        vector.x * sin + vector.y * cos,
+    )
+}
+
+/// 把屏幕坐标换成块本地坐标：以块中心为原点，并把旋转抵消掉。
+fn local_point(pointer: Pos2, screen: Rect, rotation: f32) -> Vec2 {
+    rotate(pointer - screen.center(), -rotation)
+}
+
+/// 两次指针位置相对块中心转过的角度，走最短的一边，避免跨过 ±π 时跳一整圈。
+fn angle_around(previous: Pos2, current: Pos2, center: Pos2) -> f32 {
+    let delta = (current - center).angle() - (previous - center).angle();
+    if delta > core::f32::consts::PI {
+        delta - core::f32::consts::TAU
+    } else if delta < -core::f32::consts::PI {
+        delta + core::f32::consts::TAU
+    } else {
+        delta
+    }
+}
+
+/// 拉伸：在本地坐标里拖边或角，对面的边保持不动。
+fn resized(geometry: Geometry, grab: Grab, delta: Vec2, zoom: f32) -> Geometry {
+    let local = rotate(delta, -geometry.rotation) / zoom;
+    let half = Vec2::new(geometry.width / 2.0, geometry.height / 2.0);
+    let mut min = -half;
+    let mut max = half;
+    let mut dragged_max = false;
+    let mut dragged_top = false;
+
+    match grab {
+        Grab::Horizontal { left } => {
+            if left {
+                min.x += local.x;
+            } else {
+                max.x += local.x;
+                dragged_max = true;
+            }
+        }
+        Grab::Vertical { top } => {
+            if top {
+                min.y += local.y;
+            } else {
+                max.y += local.y;
+                dragged_max = true;
+            }
+        }
+        Grab::Corner { left, top } => {
+            if left {
+                min.x += local.x;
+            } else {
+                max.x += local.x;
+                dragged_max = true;
+            }
+            if top {
+                min.y += local.y;
+            } else {
+                max.y += local.y;
+                dragged_top = true;
+            }
+        }
+        Grab::Move | Grab::Rotate => {}
+    }
+
+    // 拉到最小尺寸时顶住，不让它越拉越小。
+    if max.x - min.x < theme::MIN_BLOCK_WIDTH {
+        if dragged_max {
+            max.x = min.x + theme::MIN_BLOCK_WIDTH;
+        } else {
+            min.x = max.x - theme::MIN_BLOCK_WIDTH;
+        }
+    }
+    if max.y - min.y < theme::MIN_BLOCK_HEIGHT {
+        if dragged_top {
+            max.y = min.y + theme::MIN_BLOCK_HEIGHT;
+        } else {
+            min.y = max.y - theme::MIN_BLOCK_HEIGHT;
+        }
+    }
+
+    let width = max.x - min.x;
+    let height = max.y - min.y;
+    let center = rotate(
+        Vec2::new((min.x + max.x) / 2.0, (min.y + max.y) / 2.0),
+        geometry.rotation,
+    );
+    let (center_x, center_y) = geometry.center();
+
+    Geometry {
+        x: center_x + center.x - width / 2.0,
+        y: center_y + center.y - height / 2.0,
+        width,
+        height,
+        rotation: geometry.rotation,
+    }
+}
+
 /// 视口：世界坐标与屏幕坐标之间的换算。
 struct View {
     /// 世界原点落在屏幕上的位置。
@@ -56,6 +197,8 @@ pub struct BoardApp {
     /// 刚进入编辑的那一块，下一帧要把焦点交给编辑框。
     pending_focus: Option<u64>,
     selected: Option<u64>,
+    /// 正在拖的那块，以及拖的是移动、拉伸还是旋转。
+    drag: Option<(u64, Grab)>,
     status: Option<String>,
     fps: f32,
     dirty: bool,
@@ -69,6 +212,7 @@ impl BoardApp {
             editing: None,
             pending_focus: None,
             selected: None,
+            drag: None,
             status: None,
             fps: 0.0,
             dirty: false,
@@ -231,31 +375,87 @@ impl BoardApp {
     // ---- 交互 ----
 
     fn interact_blocks(&mut self, ui: &egui::Ui, clip: Rect) {
+        let pointer = ui.input(|input| input.pointer.hover_pos());
         let mut responses = Vec::new();
+
         for index in 0..self.document.board.entries.len() {
             let entry = &self.document.board.entries[index];
             let screen = self.view.rect_to_screen(rect_of(entry.geometry));
             if !clip.intersects(screen) {
                 continue;
             }
+            // 选中之后把可操作范围放大一圈：旋转手柄在块外面。
+            let reach = if self.selected == Some(entry.id) {
+                screen.expand(theme::GRAB_BAND)
+            } else {
+                screen
+            };
             let id = ui.scope_id().with(("block", entry.id));
-            responses.push((index, ui.interact(screen, id, Sense::click_and_drag())));
+            responses.push((index, ui.interact(reach, id, Sense::click_and_drag())));
         }
 
         for (index, response) in responses {
             let block = self.document.board.entries[index].id;
-            // 没有边框可看，指针形状就是唯一提示：指到字上变成可拖的样子。
-            if response.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            let geometry = self.document.board.entries[index].geometry;
+            let screen = self.view.rect_to_screen(rect_of(geometry));
+            let grab = pointer.and_then(|pointer| {
+                grab_at(
+                    local_point(pointer, screen, geometry.rotation),
+                    screen.size() / 2.0,
+                )
+            });
+
+            // 鼠标在哪决定干什么：字身上是拖动，边上拉伸，角外面旋转。
+            let active = self.drag.map(|(dragged, grab)| (dragged == block, grab));
+            if response.hovered() && self.editing != Some(block) {
+                let icon = match grab {
+                    Some(Grab::Rotate) => egui::CursorIcon::Crosshair,
+                    Some(Grab::Horizontal { .. }) => egui::CursorIcon::ResizeHorizontal,
+                    Some(Grab::Vertical { .. }) => egui::CursorIcon::ResizeVertical,
+                    Some(Grab::Corner { left, top }) => {
+                        if left == top {
+                            egui::CursorIcon::ResizeNwSe
+                        } else {
+                            egui::CursorIcon::ResizeNeSw
+                        }
+                    }
+                    Some(Grab::Move) | None => egui::CursorIcon::Grab,
+                };
+                ui.ctx().set_cursor_icon(icon);
             }
-            if response.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+
+            if response.drag_started()
+                && self.editing != Some(block)
+                && let Some(grab) = grab
+            {
+                self.drag = Some((block, grab));
             }
-            if response.dragged() && self.editing != Some(block) {
-                let delta = response.drag_delta() / self.view.zoom;
-                let entry = &mut self.document.board.entries[index];
-                entry.geometry = translate(entry.geometry, delta);
-                self.dirty = true;
+            if let Some((true, grab)) = active {
+                if grab == Grab::Move {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
+                let delta = response.drag_delta();
+                if delta != Vec2::ZERO {
+                    let entry = &mut self.document.board.entries[index];
+                    match grab {
+                        Grab::Move => {
+                            entry.geometry = translate(entry.geometry, delta / self.view.zoom)
+                        }
+                        Grab::Rotate => {
+                            if let Some(pointer) = pointer {
+                                entry.geometry.rotation +=
+                                    angle_around(pointer - delta, pointer, screen.center());
+                            }
+                        }
+                        Grab::Horizontal { .. } | Grab::Vertical { .. } | Grab::Corner { .. } => {
+                            entry.geometry = resized(entry.geometry, grab, delta, self.view.zoom);
+                        }
+                    }
+                    self.dirty = true;
+                }
+            }
+            if response.drag_stopped() {
+                self.drag = None;
             }
             if response.clicked() {
                 self.commit_editing();
@@ -285,6 +485,12 @@ impl BoardApp {
             }
 
             let editing = self.editing == Some(id);
+            // 编辑框转不了，进编辑时先把这块摆正，写完再转回去。
+            let rotation = if editing {
+                0.0
+            } else {
+                self.document.board.entries[index].geometry.rotation
+            };
             let size = self.block_size(id);
             let color = self.block_color(id, palette);
             let font = FontId::proportional((size * zoom).max(4.0));
@@ -295,12 +501,12 @@ impl BoardApp {
                 screen.width(),
             );
 
-            // 块高由文字算出来。文件里存的高度只是提示，视图这边永远以文字为准，
-            // 所以改字号、改内容之后框不会跟字对不上。
-            let height = galley.size().y.max(theme::MIN_BLOCK_HEIGHT);
-            if (self.document.board.entries[index].geometry.height - height).abs() > 0.5 {
-                self.document.board.entries[index].geometry.height = height;
+            // 块高至少要装得下文字：文字变多就长高，用户拉高了也不会被缩回去。
+            let needed = galley.size().y.max(theme::MIN_BLOCK_HEIGHT);
+            if self.document.board.entries[index].geometry.height < needed {
+                self.document.board.entries[index].geometry.height = needed;
             }
+            let height = self.document.board.entries[index].geometry.height;
             let block = Rect::from_min_size(screen.min, Vec2::new(screen.width(), height));
 
             // 块平时跟背景没有区别：不填充、不描边，只有字。确认并选中才画虚线框。
@@ -308,13 +514,16 @@ impl BoardApp {
                 dashed_outline(
                     &painter,
                     block,
+                    rotation,
                     Stroke::new(theme::EDGE_WIDTH * zoom, palette.selected_edge),
                     zoom,
                 );
             }
 
             if !editing {
-                painter.galley(screen.min, galley, color);
+                let text = egui::epaint::TextShape::new(screen.min, galley, color)
+                    .with_angle_and_anchor(rotation, Align2::CENTER_CENTER);
+                painter.add(egui::Shape::Text(text));
             }
         }
     }
@@ -442,7 +651,10 @@ impl BoardApp {
         else {
             return;
         };
-        let screen = self.view.rect_to_screen(rect_of(entry.geometry));
+        let screen = rotated_bounds(
+            self.view.rect_to_screen(rect_of(entry.geometry)),
+            entry.geometry.rotation,
+        );
         let Some(block) = self.document.texts.get_mut(&selected) else {
             return;
         };
@@ -490,15 +702,19 @@ fn paint_chip(
 }
 
 /// 虚线框。确认过的块才有，没有填充，只标边界。
-fn dashed_outline(painter: &egui::Painter, rect: Rect, stroke: Stroke, zoom: f32) {
+fn dashed_outline(painter: &egui::Painter, rect: Rect, rotation: f32, stroke: Stroke, zoom: f32) {
     let rect = rect.shrink(stroke.width / 2.0);
-    let corners = [
+    let center = rect.center();
+    let corners: Vec<Pos2> = [
         rect.left_top(),
         rect.right_top(),
         rect.right_bottom(),
         rect.left_bottom(),
         rect.left_top(),
-    ];
+    ]
+    .into_iter()
+    .map(|corner| center + rotate(corner - center, rotation))
+    .collect();
     for pair in corners.windows(2) {
         painter.extend(egui::Shape::dashed_line(
             pair,
@@ -507,6 +723,20 @@ fn dashed_outline(painter: &egui::Painter, rect: Rect, stroke: Stroke, zoom: f32
             3.0 * zoom,
         ));
     }
+}
+
+/// 旋转之后的包围盒，用来摆浮动的操作条。
+fn rotated_bounds(rect: Rect, rotation: f32) -> Rect {
+    let center = rect.center();
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+    .into_iter()
+    .map(|corner| center + rotate(corner - center, rotation));
+    Rect::from_points(&corners.collect::<Vec<_>>())
 }
 
 fn rect_of(geometry: Geometry) -> Rect {
@@ -664,6 +894,79 @@ mod tests {
 
         assert!(app.document().board.entries.is_empty());
         assert!(app.selected.is_none());
+    }
+
+    #[test]
+    fn the_mouse_position_decides_the_action() {
+        let half = Vec2::new(100.0, 25.0);
+        assert_eq!(grab_at(Vec2::ZERO, half), Some(Grab::Move));
+        assert_eq!(
+            grab_at(Vec2::new(99.0, 0.0), half),
+            Some(Grab::Horizontal { left: false })
+        );
+        assert_eq!(
+            grab_at(Vec2::new(-99.0, 0.0), half),
+            Some(Grab::Horizontal { left: true })
+        );
+        assert_eq!(
+            grab_at(Vec2::new(0.0, 24.0), half),
+            Some(Grab::Vertical { top: false })
+        );
+        assert_eq!(
+            grab_at(Vec2::new(100.0, 25.0), half),
+            Some(Grab::Corner {
+                left: false,
+                top: false
+            })
+        );
+        // 角外面那一圈是旋转
+        assert_eq!(grab_at(Vec2::new(110.0, 35.0), half), Some(Grab::Rotate));
+        // 更外面就什么都不做，交还给画布
+        assert_eq!(grab_at(Vec2::new(300.0, 300.0), half), None);
+    }
+
+    #[test]
+    fn resizing_keeps_the_opposite_edge_still() {
+        let geometry = Geometry::new(0.0, 0.0, 100.0, 40.0);
+
+        let wider = resized(
+            geometry,
+            Grab::Horizontal { left: false },
+            Vec2::new(20.0, 0.0),
+            1.0,
+        );
+        assert!((wider.width - 120.0).abs() < 0.001);
+        assert!(wider.x.abs() < 0.001);
+
+        let from_left = resized(
+            geometry,
+            Grab::Horizontal { left: true },
+            Vec2::new(20.0, 0.0),
+            1.0,
+        );
+        assert!((from_left.width - 80.0).abs() < 0.001);
+        assert!((from_left.x - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn rotating_a_quarter_turn_is_a_quarter_turn() {
+        let rotated = rotate(Vec2::new(1.0, 0.0), core::f32::consts::FRAC_PI_2);
+        assert!((rotated.x - 0.0).abs() < 0.001);
+        assert!((rotated.y - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn selection_survives_an_idle_frame() {
+        let ctx = egui::Context::default();
+        let mut document = Document::new("测试画板");
+        let id = document.add_text(Geometry::new(0.0, 0.0, 200.0, 60.0));
+        document.text_mut(id).text = "一行字".to_owned();
+        let mut app = BoardApp::new(document);
+
+        app.select_first();
+        assert_eq!(app.selected, Some(id));
+        frame(&ctx, &mut app, 0.0, Vec::new());
+        assert_eq!(app.selected, Some(id));
     }
 
     #[test]
