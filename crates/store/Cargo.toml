@@ -1,0 +1,8 @@
+[package]
+name = "notecevia-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+notecevia-core = { path = "../core" }
