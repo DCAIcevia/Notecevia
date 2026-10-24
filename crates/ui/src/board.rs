@@ -53,6 +53,8 @@ pub struct BoardApp {
     view: View,
     document: Document,
     editing: Option<u64>,
+    /// 刚进入编辑的那一块，下一帧要把焦点交给编辑框。
+    pending_focus: Option<u64>,
     selected: Option<u64>,
     hovered: Option<u64>,
     status: Option<String>,
@@ -66,6 +68,7 @@ impl BoardApp {
             view: View::restored(),
             document,
             editing: None,
+            pending_focus: None,
             selected: None,
             hovered: None,
             status: None,
@@ -86,6 +89,15 @@ impl BoardApp {
     /// 存过盘之后调用，清掉未保存标记。
     pub fn mark_saved(&mut self) {
         self.dirty = false;
+    }
+
+    /// 从第一块开始编辑。给命令行验证用，也因为以后要能从键盘直接进入编辑。
+    pub fn begin_editing_first(&mut self) {
+        if let Some(entry) = self.document.board.entries.first() {
+            self.selected = Some(entry.id);
+            self.editing = Some(entry.id);
+            self.pending_focus = Some(entry.id);
+        }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -129,6 +141,7 @@ impl BoardApp {
             ));
             self.selected = Some(block);
             self.editing = Some(block);
+            self.pending_focus = Some(block);
             self.dirty = true;
         }
 
@@ -211,6 +224,7 @@ impl BoardApp {
             if response.double_clicked() {
                 self.selected = Some(block);
                 self.editing = Some(block);
+                self.pending_focus = Some(block);
             }
         }
     }
@@ -277,23 +291,34 @@ impl BoardApp {
         let screen = self
             .view
             .rect_to_screen(rect_of(self.document.board.entries[index].geometry));
-        let margin = theme::BLOCK_PAD * zoom;
         let font = FontId::proportional((theme::BLOCK_FONT * zoom).max(4.0));
-        let desired_width = (screen.width() - 2.0 * margin).max(8.0);
+
+        // 编辑框按矩形定位，不用 TextEdit 自己的内边距：静态文字是 galley 偏移，
+        // 两条路径必须从「块左上角 + 内边距」这同一个点开始，否则一进编辑文字就跳。
+        let inner = screen.shrink(theme::BLOCK_PAD * zoom);
+
+        let editor_id = ui.scope_id().with(("editor", block));
 
         let response = {
             let text = &mut self.document.text_mut(block).text;
             let editor = egui::TextEdit::multiline(text)
-                .id(ui.scope_id().with(("editor", block)))
+                .id(editor_id)
                 .font(font)
                 .text_color(palette.text)
                 .background_color(palette.block_fill)
-                .margin(egui::Margin::same(margin.round() as i8))
+                .margin(egui::Margin::ZERO)
                 .frame(egui::Frame::NONE)
-                .desired_width(desired_width)
+                .desired_width(inner.width())
                 .desired_rows(1);
-            ui.put(screen, editor)
+            ui.put(inner, editor)
         };
+
+        // 焦点要等编辑框建好之后再要：它建起来时会因为「这次点击落在框外」而放弃焦点，
+        // 先要就被立刻清掉。放到后面要，焦点留到下一帧，用户双击完就能直接打字。
+        if self.pending_focus == Some(block) {
+            ui.memory_mut(|memory| memory.request_focus(editor_id));
+            self.pending_focus = None;
+        }
 
         if response.changed() {
             self.dirty = true;
@@ -447,6 +472,53 @@ mod tests {
             app.zoom_at(pointer, 0.25);
         }
         assert!((app.view.zoom - MIN_ZOOM).abs() < 0.001);
+    }
+
+    fn frame(ctx: &egui::Context, app: &mut BoardApp, time: f64, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            time: Some(time),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 760.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.ui(ui));
+        // 没有渲染后端来消费纹理上传，测试里自己丢掉这些增量。
+        output.textures_delta.clear();
+    }
+
+    fn click(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    #[test]
+    fn double_click_makes_a_block_that_takes_typing() {
+        let ctx = egui::Context::default();
+        let mut app = BoardApp::new(Document::new("测试画板"));
+        let pointer = Pos2::new(400.0, 300.0);
+
+        frame(
+            &ctx,
+            &mut app,
+            0.0,
+            vec![egui::Event::PointerMoved(pointer), click(pointer, true)],
+        );
+        frame(&ctx, &mut app, 0.05, vec![click(pointer, false)]);
+        frame(&ctx, &mut app, 0.10, vec![click(pointer, true)]);
+        frame(&ctx, &mut app, 0.15, vec![click(pointer, false)]);
+        assert_eq!(app.document().board.entries.len(), 1);
+
+        frame(
+            &ctx,
+            &mut app,
+            0.20,
+            vec![egui::Event::Text("h".to_owned())],
+        );
+        assert_eq!(app.document().text_of(1), "h");
     }
 
     #[test]

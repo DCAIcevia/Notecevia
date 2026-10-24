@@ -70,12 +70,14 @@ fn main() -> eframe::Result {
     let mut shot = None;
     let mut dark = false;
     let mut stress = false;
+    let mut edit = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--shot") => shot = args.next().map(PathBuf::from),
             Some("--dark") => dark = true,
             Some("--stress") => stress = true,
+            Some("--edit") => edit = true,
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -121,6 +123,9 @@ fn main() -> eframe::Result {
             }
             if stress {
                 board.spawn_stress();
+            }
+            if edit {
+                board.begin_editing_first();
             }
             Ok(Box::new(App {
                 board,
