@@ -11,3 +11,6 @@ path = "src/main.rs"
 [dependencies]
 notecevia-store = { path = "../store" }
 notecevia-ui = { path = "../ui" }
+egui.workspace = true
+eframe.workspace = true
+image.workspace = true

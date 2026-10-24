@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
 
-//! 界面、主题与交互。
+//! 界面：把状态映射成画面。
+
+pub mod board;
+pub mod strings;
+pub mod theme;
+
+pub use board::BoardApp;
 
 use notecevia_core::version;
 
