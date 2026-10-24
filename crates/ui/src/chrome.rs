@@ -15,8 +15,8 @@ pub const TOP_BAR_HEIGHT: f32 = 40.0;
 const TOOLBAR_HEIGHT: f32 = 32.0;
 const TOOLBAR_GAP: f32 = 8.0;
 const BUTTON: f32 = 24.0;
-const SWATCH: f32 = 12.0;
-const SWATCH_GAP: f32 = 8.0;
+const COLOR_BUTTON: f32 = 26.0;
+const GAP: f32 = 6.0;
 const PAD: f32 = 8.0;
 const RADIUS: u8 = 6;
 
@@ -55,11 +55,7 @@ pub fn style_toolbar(
     block: Rect,
     style: &mut TextBlock,
 ) -> bool {
-    let width = PAD * 2.0
-        + BUTTON * 2.0
-        + SWATCH_GAP
-        + theme::TEXT_COLORS.len() as f32 * (SWATCH + SWATCH_GAP)
-        - SWATCH_GAP;
+    let width = PAD * 2.0 + BUTTON * 2.0 + GAP * 2.0 + COLOR_BUTTON * 2.0;
     let area = ui.clip_rect();
     // 默认浮在块上方；上方放不下就挪到块下方，不躲到屏幕外。
     let above = block.top() - TOOLBAR_GAP - TOOLBAR_HEIGHT;
@@ -108,38 +104,141 @@ pub fn style_toolbar(
         x += BUTTON;
     }
 
-    x += SWATCH_GAP;
-    for (index, color) in theme::TEXT_COLORS.iter().enumerate() {
-        let center = Pos2::new(x + SWATCH / 2.0, middle);
-        let dot = Rect::from_center_size(center, Vec2::splat(SWATCH));
-        let response = ui.interact(
-            dot.expand(SWATCH_GAP / 2.0),
-            ui.scope_id().with(("color", index)),
-            Sense::click(),
-        );
-        let fill = match color {
-            Some([r, g, b]) => Color32::from_rgb(*r, *g, *b),
-            None => palette.text,
-        };
-        painter.circle_filled(center, SWATCH / 2.0, fill);
-        if style.color == *color {
-            painter.circle_stroke(center, SWATCH / 2.0 + 2.0, Stroke::new(1.0, palette.text));
-        } else if response.hovered() {
-            painter.circle_stroke(
-                center,
-                SWATCH / 2.0 + 2.0,
-                Stroke::new(1.0, palette.hover_edge),
+    // 文字色。点开是调色板：自动 + 常见色 + 自己调。
+    x += GAP;
+    let button = Rect::from_center_size(
+        Pos2::new(x + COLOR_BUTTON / 2.0, middle),
+        Vec2::splat(COLOR_BUTTON),
+    );
+    let response = ui.interact(button, ui.scope_id().with("text-colour"), Sense::click());
+    paint_text_colour_button(painter, button, palette, style.color, response.hovered());
+    changed |= colour_popup(palette, &response, &mut style.color);
+    x += COLOR_BUTTON;
+
+    // 底色。跟文字色同一个调色板。
+    x += GAP;
+    let button = Rect::from_center_size(
+        Pos2::new(x + COLOR_BUTTON / 2.0, middle),
+        Vec2::splat(COLOR_BUTTON),
+    );
+    let response = ui.interact(
+        button,
+        ui.scope_id().with("background-colour"),
+        Sense::click(),
+    );
+    paint_background_colour_button(
+        painter,
+        button,
+        palette,
+        style.background,
+        response.hovered(),
+    );
+    changed |= colour_popup(palette, &response, &mut style.background);
+
+    changed
+}
+
+/// 调色板：自动（跟随主题）、一排常见色，再加一个能自己调的取色器。
+fn colour_popup(
+    palette: &theme::Palette,
+    button: &egui::Response,
+    target: &mut Option<[u8; 3]>,
+) -> bool {
+    let mut changed = false;
+    egui::Popup::from_toggle_button_response(button)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(target.is_none(), strings::COLOUR_AUTO)
+                    .clicked()
+                {
+                    *target = None;
+                    changed = true;
+                    ui.close();
+                }
+                for colour in theme::TEXT_COLORS {
+                    let swatch = Rect::from_min_size(ui.cursor().min, Vec2::splat(BUTTON / 1.2));
+                    let response = ui.allocate_rect(swatch, Sense::click());
+                    ui.painter().rect_filled(
+                        swatch.shrink(2.0),
+                        CornerRadius::same(2),
+                        Color32::from_rgb(colour[0], colour[1], colour[2]),
+                    );
+                    if response.clicked() {
+                        *target = Some(colour);
+                        changed = true;
+                        ui.close();
+                    }
+                }
+            });
+
+            let mut current = target.map_or(palette.text, |[r, g, b]| Color32::from_rgb(r, g, b));
+            if egui::color_picker::color_picker_color32(
+                ui,
+                &mut current,
+                egui::color_picker::Alpha::Opaque,
+            ) {
+                let [r, g, b, _] = current.to_srgba_unmultiplied();
+                *target = Some([r, g, b]);
+                changed = true;
+            }
+        });
+    changed
+}
+
+fn paint_text_colour_button(
+    painter: &egui::Painter,
+    button: Rect,
+    palette: &theme::Palette,
+    colour: Option<[u8; 3]>,
+    hovered: bool,
+) {
+    if hovered {
+        painter.rect_filled(button, CornerRadius::same(RADIUS), palette.media_fill);
+    }
+    let centre = button.center();
+    let radius = 6.0;
+    match colour {
+        Some([r, g, b]) => {
+            painter.circle_filled(centre, radius, Color32::from_rgb(r, g, b));
+        }
+        // 没设过就是跟随主题，画一个空心圈。
+        None => {
+            painter.circle_stroke(centre, radius, Stroke::new(1.0, palette.text));
+        }
+    }
+}
+
+fn paint_background_colour_button(
+    painter: &egui::Painter,
+    button: Rect,
+    palette: &theme::Palette,
+    colour: Option<[u8; 3]>,
+    hovered: bool,
+) {
+    if hovered {
+        painter.rect_filled(button, CornerRadius::same(RADIUS), palette.media_fill);
+    }
+    let square = Rect::from_center_size(button.center(), Vec2::splat(12.0));
+    match colour {
+        Some([r, g, b]) => {
+            painter.rect_filled(square, CornerRadius::same(2), Color32::from_rgb(r, g, b));
+        }
+        // 没底色就是一个空框加一道斜线，表示没有。
+        None => {
+            painter.rect_stroke(
+                square,
+                CornerRadius::same(2),
+                Stroke::new(1.0, palette.text),
+                StrokeKind::Inside,
+            );
+            painter.line_segment(
+                [square.left_top(), square.right_bottom()],
+                Stroke::new(1.0, palette.text),
             );
         }
-        if response.clicked() {
-            style.color = *color;
-            changed = true;
-        }
-        x += SWATCH + SWATCH_GAP;
     }
-
-    let _ = strings::UNSAVED;
-    changed
 }
 
 /// 在字号档位里上下走一格。没设过字号时从默认档开始。

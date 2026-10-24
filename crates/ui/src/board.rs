@@ -509,6 +509,20 @@ impl BoardApp {
             let height = self.document.board.entries[index].geometry.height;
             let block = Rect::from_min_size(screen.min, Vec2::new(screen.width(), height));
 
+            // 设了底色就先铺一层，颜色是用户自己选的，跟着块一起转。
+            if let Some([r, g, b]) = self
+                .document
+                .texts
+                .get(&id)
+                .and_then(|block| block.background)
+            {
+                painter.add(egui::Shape::convex_polygon(
+                    rotated_corners(block, rotation).to_vec(),
+                    Color32::from_rgb(r, g, b),
+                    Stroke::NONE,
+                ));
+            }
+
             // 块平时跟背景没有区别：不填充、不描边，只有字。确认并选中才画虚线框。
             if self.selected == Some(id) {
                 dashed_outline(
@@ -554,13 +568,20 @@ impl BoardApp {
         let inner = screen;
         let editor_id = ui.scope_id().with(("editor", block));
 
+        let background = self
+            .document
+            .texts
+            .get(&block)
+            .and_then(|block| block.background)
+            .map_or(Color32::TRANSPARENT, |[r, g, b]| Color32::from_rgb(r, g, b));
+
         let response = {
             let text = &mut self.document.text_mut(block).text;
             let editor = egui::TextEdit::multiline(text)
                 .id(editor_id)
                 .font(font.clone())
                 .text_color(text_color)
-                .background_color(Color32::TRANSPARENT)
+                .background_color(background)
                 .margin(egui::Margin::ZERO)
                 .frame(egui::Frame::NONE)
                 .desired_width(inner.width())
@@ -625,13 +646,24 @@ impl BoardApp {
             .unwrap_or(theme::BLOCK_FONT)
     }
 
-    /// 一块的颜色。没设过就跟随主题，浅色深色都好看。
+    /// 一块的文字颜色。
+    ///
+    /// 用户设过就用他设的；没设过但配了底色，就按底色亮度挑黑或白——
+    /// 深色主题下的白字落在浅黄底上根本看不见，这种时候得替用户选一次。
     fn block_color(&self, id: u64, palette: &theme::Palette) -> Color32 {
-        self.document
-            .texts
-            .get(&id)
-            .and_then(|block| block.color)
-            .map_or(palette.text, |[r, g, b]| Color32::from_rgb(r, g, b))
+        let block = self.document.texts.get(&id);
+        if let Some([r, g, b]) = block.and_then(|block| block.color) {
+            return Color32::from_rgb(r, g, b);
+        }
+        if let Some([r, g, b]) = block.and_then(|block| block.background) {
+            let luma = (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)) / 255.0;
+            return if luma > 0.55 {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            };
+        }
+        palette.text
     }
 
     /// 选中一块时在它上方浮出格式操作条。编辑文字时不出现，免得抢焦点。
@@ -704,25 +736,27 @@ fn paint_chip(
 /// 虚线框。确认过的块才有，没有填充，只标边界。
 fn dashed_outline(painter: &egui::Painter, rect: Rect, rotation: f32, stroke: Stroke, zoom: f32) {
     let rect = rect.shrink(stroke.width / 2.0);
-    let center = rect.center();
-    let corners: Vec<Pos2> = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ]
-    .into_iter()
-    .map(|corner| center + rotate(corner - center, rotation))
-    .collect();
-    for pair in corners.windows(2) {
+    let corners = rotated_corners(rect, rotation);
+    for index in 0..4 {
         painter.extend(egui::Shape::dashed_line(
-            pair,
+            &[corners[index], corners[(index + 1) % 4]],
             stroke,
             4.0 * zoom,
             3.0 * zoom,
         ));
     }
+}
+
+/// 块的四个角，按旋转之后的屏幕位置给。
+fn rotated_corners(rect: Rect, rotation: f32) -> [Pos2; 4] {
+    let center = rect.center();
+    [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+    .map(|corner| center + rotate(corner - center, rotation))
 }
 
 /// 旋转之后的包围盒，用来摆浮动的操作条。
