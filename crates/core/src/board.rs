@@ -87,6 +87,7 @@ pub struct TextBlock {
     pub text: String,
     pub size: Option<f32>,
     pub color: Option<[u8; 3]>,
+    pub background: Option<[u8; 3]>,
 }
 
 /// 一张画板：标题加目录。正文不在目录里，按需读取。

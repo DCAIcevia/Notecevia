@@ -174,6 +174,9 @@ fn text_value(id: u64, block: &TextBlock) -> Value {
     if let Some([r, g, b]) = block.color {
         pairs.push(("color", Value::text(format!("#{r:02x}{g:02x}{b:02x}"))));
     }
+    if let Some([r, g, b]) = block.background {
+        pairs.push(("background", Value::text(format!("#{r:02x}{g:02x}{b:02x}"))));
+    }
     Value::map(pairs)
 }
 
@@ -271,10 +274,15 @@ fn text_from(value: &Value) -> Result<TextBlock, Error> {
         .get("color")
         .and_then(Value::as_text)
         .and_then(parse_color);
+    let background = value
+        .get("background")
+        .and_then(Value::as_text)
+        .and_then(parse_color);
     Ok(TextBlock {
         text: text.to_owned(),
         size,
         color,
+        background,
     })
 }
 
@@ -326,6 +334,17 @@ mod tests {
         let root = temp_root("roundtrip");
         let workspace = Workspace::open(&root).expect("open");
         let document = sample();
+        workspace.save(&document).expect("save");
+        assert_eq!(workspace.load().expect("load"), document);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn background_colour_survives_a_roundtrip() {
+        let root = temp_root("background");
+        let workspace = Workspace::open(&root).expect("open");
+        let mut document = sample();
+        document.texts.get_mut(&1).expect("block").background = Some([240, 230, 140]);
         workspace.save(&document).expect("save");
         assert_eq!(workspace.load().expect("load"), document);
         let _ = fs::remove_dir_all(&root);
