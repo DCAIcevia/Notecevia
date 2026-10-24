@@ -65,10 +65,15 @@ pub struct Entry {
     pub z: i32,
 }
 
-/// 文字块的正文。
+/// 文字块的正文与样式。
+///
+/// size 与 color 都是可空的：空表示跟随界面主题，这样浅色和深色都好看，
+/// 用户明确选过的颜色才写死。将来加粗体、行内样式，从这里长一个 span 表出来。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextBlock {
     pub text: String,
+    pub size: Option<f32>,
+    pub color: Option<[u8; 3]>,
 }
 
 /// 一张画板：标题加目录。正文不在目录里，按需读取。

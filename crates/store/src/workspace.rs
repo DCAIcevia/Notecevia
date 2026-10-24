@@ -159,13 +159,21 @@ impl Workspace {
     }
 }
 
-fn text_value(id: u64, text: &TextBlock) -> Value {
-    Value::map(vec![
+fn text_value(id: u64, block: &TextBlock) -> Value {
+    let mut pairs = vec![
         ("format", Value::Integer(FORMAT)),
         ("block_type", Value::Integer(BlockKind::Text.number())),
         ("id", Value::Integer(id as i64)),
-        ("text", Value::text(text.text.clone())),
-    ])
+        ("text", Value::text(block.text.clone())),
+    ];
+    // 没设过的样式不写，交给读的一方用主题默认值。
+    if let Some(size) = block.size {
+        pairs.push(("size", Value::Float(f64::from(size))));
+    }
+    if let Some([r, g, b]) = block.color {
+        pairs.push(("color", Value::text(format!("#{r:02x}{g:02x}{b:02x}"))));
+    }
+    Value::map(pairs)
 }
 
 /// 先写临时文件、落盘后再改名。改名是同目录的原子操作，
@@ -247,9 +255,29 @@ fn text_from(value: &Value) -> Result<TextBlock, Error> {
         .get("text")
         .and_then(Value::as_text)
         .ok_or(Error::MissingField("text"))?;
+    let size = value
+        .get("size")
+        .and_then(Value::as_float)
+        .map(|size| size as f32);
+    let color = value
+        .get("color")
+        .and_then(Value::as_text)
+        .and_then(parse_color);
     Ok(TextBlock {
         text: text.to_owned(),
+        size,
+        color,
     })
+}
+
+/// 颜色写成 #rrggbb。读不出来就当没设过，不猜。
+fn parse_color(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let component = |range: core::ops::Range<usize>| u8::from_str_radix(&hex[range], 16).ok();
+    Some([component(0..2)?, component(2..4)?, component(4..6)?])
 }
 
 fn integer(value: &Value, key: &'static str) -> Result<i64, Error> {
@@ -290,6 +318,18 @@ mod tests {
         let root = temp_root("roundtrip");
         let workspace = Workspace::open(&root).expect("open");
         let document = sample();
+        workspace.save(&document).expect("save");
+        assert_eq!(workspace.load().expect("load"), document);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn text_style_survives_a_roundtrip() {
+        let root = temp_root("style");
+        let workspace = Workspace::open(&root).expect("open");
+        let mut document = sample();
+        document.texts.get_mut(&1).expect("block").size = Some(26.0);
+        document.texts.get_mut(&1).expect("block").color = Some([220, 90, 80]);
         workspace.save(&document).expect("save");
         assert_eq!(workspace.load().expect("load"), document);
         let _ = fs::remove_dir_all(&root);
