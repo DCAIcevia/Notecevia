@@ -1,5 +1,8 @@
 # Notecevia
 
+[![CI](https://github.com/acvrac/Notecevia/actions/workflows/ci.yml/badge.svg)](https://github.com/acvrac/Notecevia/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/acvrac/Notecevia?include_prereleases&label=release)](https://github.com/acvrac/Notecevia/releases)
+
 单机离线的桌面画板笔记：一张无限画布上写字，内容存在本机，导出的文件自带全部内容。
 
 阶段：Alpha。功能与文件格式都可能变化，变化时带迁移，不丢数据。
