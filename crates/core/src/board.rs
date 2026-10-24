@@ -85,6 +85,8 @@ pub struct Entry {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextBlock {
     pub text: String,
+    /// 字体族名，省掉表示跟随主题默认字体。
+    pub font: Option<String>,
     pub size: Option<f32>,
     pub color: Option<[u8; 3]>,
     pub background: Option<[u8; 3]>,

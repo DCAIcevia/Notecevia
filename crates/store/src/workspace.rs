@@ -168,6 +168,9 @@ fn text_value(id: u64, block: &TextBlock) -> Value {
         ("text", Value::text(block.text.clone())),
     ];
     // 没设过的样式不写，交给读的一方用主题默认值。
+    if let Some(font) = &block.font {
+        pairs.push(("font", Value::text(font.clone())));
+    }
     if let Some(size) = block.size {
         pairs.push(("size", Value::Float(f64::from(size))));
     }
@@ -266,6 +269,10 @@ fn text_from(value: &Value) -> Result<TextBlock, Error> {
         .get("text")
         .and_then(Value::as_text)
         .ok_or(Error::MissingField("text"))?;
+    let font = value
+        .get("font")
+        .and_then(Value::as_text)
+        .map(str::to_owned);
     let size = value
         .get("size")
         .and_then(Value::as_float)
@@ -280,6 +287,7 @@ fn text_from(value: &Value) -> Result<TextBlock, Error> {
         .and_then(parse_color);
     Ok(TextBlock {
         text: text.to_owned(),
+        font,
         size,
         color,
         background,
@@ -334,6 +342,17 @@ mod tests {
         let root = temp_root("roundtrip");
         let workspace = Workspace::open(&root).expect("open");
         let document = sample();
+        workspace.save(&document).expect("save");
+        assert_eq!(workspace.load().expect("load"), document);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn font_family_survives_a_roundtrip() {
+        let root = temp_root("font");
+        let workspace = Workspace::open(&root).expect("open");
+        let mut document = sample();
+        document.texts.get_mut(&1).expect("block").font = Some("SimSun".to_owned());
         workspace.save(&document).expect("save");
         assert_eq!(workspace.load().expect("load"), document);
         let _ = fs::remove_dir_all(&root);
