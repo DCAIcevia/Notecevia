@@ -11,6 +11,8 @@ use notecevia_ui::BoardApp;
 
 struct App {
     board: BoardApp,
+    /// 当前画板的编号，文件名就是它。
+    board_id: u64,
     workspace: Option<Workspace>,
     /// 旧文件打不开时关掉写盘，免得用空画板盖掉用户原来那份。
     can_save: bool,
@@ -24,7 +26,7 @@ impl App {
         let (Some(workspace), true) = (&self.workspace, self.can_save) else {
             return;
         };
-        match workspace.save(self.board.document()) {
+        match workspace.save(self.board_id, self.board.document()) {
             Ok(()) => {
                 self.board.mark_saved();
                 self.board.set_status("已保存");
@@ -34,11 +36,33 @@ impl App {
     }
 }
 
+impl App {
+    /// 新建一张画板：先把当前这张存好，再换一张空的。
+    fn new_board(&mut self) {
+        let Some(next) = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.next_board().ok())
+        else {
+            self.board.set_status("新建失败：工作区不可用");
+            return;
+        };
+        self.save();
+        self.board_id = next;
+        self.board.replace_document(Document::new("画板"));
+        self.save();
+        self.board.set_status("已新建画板");
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.board.ui(ui);
 
         let ctx = ui.ctx().clone();
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
+            self.new_board();
+        }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
             self.save();
         }
@@ -101,11 +125,13 @@ fn main() -> eframe::Result {
             }
 
             let root = notecevia_store::workspace_root();
-            let (workspace, document, can_save, status) = match Workspace::open(&root) {
-                Ok(workspace) => match workspace.load() {
-                    Ok(document) => (Some(workspace), document, true, None),
+            let (workspace, board_id, document, can_save, status) = match Workspace::open(&root) {
+                Ok(workspace) => match workspace.load_latest() {
+                    Ok(Some((id, document))) => (Some(workspace), id, document, true, None),
+                    Ok(None) => (Some(workspace), 1, Document::new("画板"), true, None),
                     Err(error) => (
                         Some(workspace),
+                        1,
                         Document::new("画板"),
                         false,
                         Some(format!("打开失败，本次不写盘：{error}")),
@@ -113,9 +139,10 @@ fn main() -> eframe::Result {
                 },
                 Err(error) => (
                     None,
+                    1,
                     Document::new("画板"),
                     false,
-                    Some(format!("工作区打不开：{error}")),
+                    Some(format!("工作区打不开（{}）：{error}", root.display())),
                 ),
             };
 
@@ -134,6 +161,7 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(App {
                 board,
+                board_id,
                 workspace,
                 can_save,
                 shot,

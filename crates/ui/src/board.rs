@@ -235,6 +235,18 @@ impl BoardApp {
         self.status = Some(status.into());
     }
 
+    /// 换一张画板：视图、选中、编辑状态全部回到初始。
+    pub fn replace_document(&mut self, document: Document) {
+        self.document = document;
+        self.view = View::restored();
+        self.editing = None;
+        self.pending_focus = None;
+        self.selected = None;
+        self.drag = None;
+        self.status = None;
+        self.dirty = false;
+    }
+
     /// 存过盘之后调用，清掉未保存标记。
     pub fn mark_saved(&mut self) {
         self.dirty = false;

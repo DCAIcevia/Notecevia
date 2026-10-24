@@ -20,8 +20,7 @@ use crate::cbor::{self, CborError, Value};
 
 /// 这一版写的格式号。读到更大的号就停下，让用户升级程序。
 const FORMAT: i64 = 1;
-/// A1 只有一张画板；多画板与列表属于 A3。
-const BOARD_FILE: &str = "boards/1.board";
+const BOARDS_DIR: &str = "boards";
 const BLOCKS_DIR: &str = "blocks";
 
 #[derive(Debug, Error)]
@@ -47,7 +46,7 @@ impl Workspace {
     /// 打开或建立工作区。目录不存在就建，已有的内容不动。
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, Error> {
         let workspace = Self { root: root.into() };
-        for dir in ["boards", BLOCKS_DIR, "media"] {
+        for dir in [BOARDS_DIR, BLOCKS_DIR, "media"] {
             fs::create_dir_all(workspace.root.join(dir))?;
         }
         Ok(workspace)
@@ -57,12 +56,62 @@ impl Workspace {
         &self.root
     }
 
-    /// 读画板与它引用的正文。画板还不存在时给一张空画板，第一次启动就是这种情况。
+    /// 最近的一张画板：编号最大的那个。没有画板时返回 None，第一次启动就是这种情况。
+    pub fn load_latest(&self) -> Result<Option<(u64, Document)>, Error> {
+        let mut latest = None;
+        for entry in fs::read_dir(self.root.join(BOARDS_DIR))? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("board") {
+                continue;
+            }
+            let Some(id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let better = match &latest {
+                Some((best, _)) => id > *best,
+                None => true,
+            };
+            if better {
+                latest = Some((id, path));
+            }
+        }
+        let Some((id, _)) = latest else {
+            return Ok(None);
+        };
+        Ok(Some((id, self.load(id)?)))
+    }
+
+    /// 下一个可用的画板编号。删过的不复用，免得旧文件被新内容顶替。
+    pub fn next_board(&self) -> Result<u64, Error> {
+        let mut next = 1;
+        for entry in fs::read_dir(self.root.join(BOARDS_DIR))? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("board") {
+                continue;
+            }
+            if let Some(id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<u64>().ok())
+            {
+                next = next.max(id + 1);
+            }
+        }
+        Ok(next)
+    }
+
+    /// 读一张画板与它引用的正文。画板文件不存在时给一张空画板。
     ///
     /// 单个块文件坏了只丢那一段正文，位置留着，用户能重新写。画板文件本身坏了才是
     /// 真错误——那种情况宁可报错让人看见，也不要拿空画板覆盖掉。
-    pub fn load(&self) -> Result<Document, Error> {
-        let bytes = match fs::read(self.root.join(BOARD_FILE)) {
+    pub fn load(&self, board_id: u64) -> Result<Document, Error> {
+        let bytes = match fs::read(self.board_path(board_id)) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Document::new("画板"));
@@ -73,7 +122,7 @@ impl Workspace {
         let board = board_from(&cbor::decode(&bytes)?)?;
         let mut texts = BTreeMap::new();
         for entry in &board.entries {
-            let reference = self.block_ref(entry.id);
+            let reference = self.block_ref(board_id, entry.id);
             let Some(path) = self.resolve(&reference) else {
                 continue;
             };
@@ -91,20 +140,26 @@ impl Workspace {
     }
 
     /// 存盘。先写块再写画板，每个文件都是先写临时文件再改名。
-    pub fn save(&self, document: &Document) -> Result<(), Error> {
+    pub fn save(&self, board_id: u64, document: &Document) -> Result<(), Error> {
         for (id, text) in &document.texts {
             let value = text_value(*id, text);
-            let path = self.root.join(self.block_ref(*id));
+            let path = self.root.join(self.block_ref(board_id, *id));
             write_atomic(&path, &cbor::encode(&value))?;
         }
-        let value = self.board_value(&document.board);
-        write_atomic(&self.root.join(BOARD_FILE), &cbor::encode(&value))?;
+        let value = self.board_value(board_id, &document.board);
+        write_atomic(&self.board_path(board_id), &cbor::encode(&value))?;
         Ok(())
     }
 
-    /// 目录项里记的块地址：工作区内用相对路径，正斜杠，跨平台一致。
-    fn block_ref(&self, id: u64) -> String {
-        format!("{BLOCKS_DIR}/{id}.block")
+    fn board_path(&self, board_id: u64) -> PathBuf {
+        self.root.join(BOARDS_DIR).join(format!("{board_id}.board"))
+    }
+
+    /// 目录项里记的块地址：工作区内，正斜杠，跨平台一致。
+    ///
+    /// 块编号只在画板内唯一，所以文件名带上画板号，多张画板的块不会撞车。
+    fn block_ref(&self, board_id: u64, id: u64) -> String {
+        format!("{BLOCKS_DIR}/{board_id}-{id}.block")
     }
 
     /// 把画板里记的地址变成本机路径。
@@ -127,7 +182,7 @@ impl Workspace {
         Some(self.root.join(path))
     }
 
-    fn board_value(&self, board: &Board) -> Value {
+    fn board_value(&self, board_id: u64, board: &Board) -> Value {
         Value::map(vec![
             ("format", Value::Integer(FORMAT)),
             ("kind", Value::text("board")),
@@ -138,18 +193,18 @@ impl Workspace {
                     board
                         .entries
                         .iter()
-                        .map(|entry| self.entry_value(entry))
+                        .map(|entry| self.entry_value(board_id, entry))
                         .collect(),
                 ),
             ),
         ])
     }
 
-    fn entry_value(&self, entry: &Entry) -> Value {
+    fn entry_value(&self, board_id: u64, entry: &Entry) -> Value {
         Value::map(vec![
             ("id", Value::Integer(entry.id as i64)),
             ("block_type", Value::Integer(entry.kind.number())),
-            ("block_ref", Value::text(self.block_ref(entry.id))),
+            ("block_ref", Value::text(self.block_ref(board_id, entry.id))),
             ("x", Value::Float(f64::from(entry.geometry.x))),
             ("y", Value::Float(f64::from(entry.geometry.y))),
             ("w", Value::Float(f64::from(entry.geometry.width))),
@@ -342,8 +397,8 @@ mod tests {
         let root = temp_root("roundtrip");
         let workspace = Workspace::open(&root).expect("open");
         let document = sample();
-        workspace.save(&document).expect("save");
-        assert_eq!(workspace.load().expect("load"), document);
+        workspace.save(1, &document).expect("save");
+        assert_eq!(workspace.load(1).expect("load"), document);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -353,8 +408,8 @@ mod tests {
         let workspace = Workspace::open(&root).expect("open");
         let mut document = sample();
         document.texts.get_mut(&1).expect("block").font = Some("SimSun".to_owned());
-        workspace.save(&document).expect("save");
-        assert_eq!(workspace.load().expect("load"), document);
+        workspace.save(1, &document).expect("save");
+        assert_eq!(workspace.load(1).expect("load"), document);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -364,8 +419,8 @@ mod tests {
         let workspace = Workspace::open(&root).expect("open");
         let mut document = sample();
         document.texts.get_mut(&1).expect("block").background = Some([240, 230, 140]);
-        workspace.save(&document).expect("save");
-        assert_eq!(workspace.load().expect("load"), document);
+        workspace.save(1, &document).expect("save");
+        assert_eq!(workspace.load(1).expect("load"), document);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -375,8 +430,8 @@ mod tests {
         let workspace = Workspace::open(&root).expect("open");
         let mut document = sample();
         document.board.entries[0].geometry.rotation = 0.75;
-        workspace.save(&document).expect("save");
-        assert_eq!(workspace.load().expect("load"), document);
+        workspace.save(1, &document).expect("save");
+        assert_eq!(workspace.load(1).expect("load"), document);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -387,8 +442,27 @@ mod tests {
         let mut document = sample();
         document.texts.get_mut(&1).expect("block").size = Some(26.0);
         document.texts.get_mut(&1).expect("block").color = Some([220, 90, 80]);
-        workspace.save(&document).expect("save");
-        assert_eq!(workspace.load().expect("load"), document);
+        workspace.save(1, &document).expect("save");
+        assert_eq!(workspace.load(1).expect("load"), document);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn boards_are_numbered_and_the_latest_is_loaded() {
+        let root = temp_root("boards");
+        let workspace = Workspace::open(&root).expect("open");
+        assert_eq!(workspace.load_latest().expect("load"), None);
+        assert_eq!(workspace.next_board().expect("next"), 1);
+
+        workspace.save(1, &sample()).expect("save 1");
+        let mut second = Document::new("第二张");
+        second.add_text(Geometry::new(0.0, 0.0, 100.0, 40.0));
+        workspace.save(2, &second).expect("save 2");
+
+        assert_eq!(workspace.next_board().expect("next"), 3);
+        let (id, loaded) = workspace.load_latest().expect("latest").expect("some");
+        assert_eq!(id, 2);
+        assert_eq!(loaded, second);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -396,7 +470,7 @@ mod tests {
     fn first_load_is_an_empty_board() {
         let root = temp_root("empty");
         let workspace = Workspace::open(&root).expect("open");
-        let document = workspace.load().expect("load");
+        let document = workspace.load(1).expect("load");
         assert!(document.board.entries.is_empty());
         assert!(document.texts.is_empty());
         let _ = fs::remove_dir_all(&root);
@@ -406,11 +480,11 @@ mod tests {
     fn saving_twice_keeps_the_newer_content() {
         let root = temp_root("rewrite");
         let workspace = Workspace::open(&root).expect("open");
-        workspace.save(&sample()).expect("save");
+        workspace.save(1, &sample()).expect("save");
         let mut second = sample();
         second.texts.get_mut(&1).expect("block").text = "改过的内容".to_owned();
-        workspace.save(&second).expect("save again");
-        assert_eq!(workspace.load().expect("load"), second);
+        workspace.save(1, &second).expect("save again");
+        assert_eq!(workspace.load(1).expect("load"), second);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -418,9 +492,9 @@ mod tests {
     fn missing_block_file_keeps_the_position() {
         let root = temp_root("orphan");
         let workspace = Workspace::open(&root).expect("open");
-        workspace.save(&sample()).expect("save");
-        fs::remove_file(root.join("blocks").join("1.block")).expect("remove");
-        let document = workspace.load().expect("load");
+        workspace.save(1, &sample()).expect("save");
+        fs::remove_file(root.join("blocks").join("1-1.block")).expect("remove");
+        let document = workspace.load(1).expect("load");
         assert_eq!(document.board.entries.len(), 1);
         assert!(document.texts.is_empty());
         let _ = fs::remove_dir_all(&root);
@@ -435,8 +509,8 @@ mod tests {
             ("title", Value::text("未来的画板")),
             ("entries", Value::Array(Vec::new())),
         ]);
-        fs::write(root.join(BOARD_FILE), cbor::encode(&value)).expect("write");
-        assert!(matches!(workspace.load(), Err(Error::NewerFormat { .. })));
+        fs::write(root.join("boards").join("1.board"), cbor::encode(&value)).expect("write");
+        assert!(matches!(workspace.load(1), Err(Error::NewerFormat { .. })));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -444,9 +518,9 @@ mod tests {
     fn broken_block_file_is_skipped() {
         let root = temp_root("broken");
         let workspace = Workspace::open(&root).expect("open");
-        workspace.save(&sample()).expect("save");
-        fs::write(root.join("blocks").join("1.block"), b"not cbor at all").expect("write");
-        let document = workspace.load().expect("load");
+        workspace.save(1, &sample()).expect("save");
+        fs::write(root.join("blocks").join("1-1.block"), b"not cbor at all").expect("write");
+        let document = workspace.load(1).expect("load");
         assert_eq!(document.board.entries.len(), 1);
         assert!(document.texts.is_empty());
         let _ = fs::remove_dir_all(&root);
