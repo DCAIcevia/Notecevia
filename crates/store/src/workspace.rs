@@ -168,7 +168,9 @@ impl Workspace {
     /// 画板文件就能让程序读写工作区之外的地方。
     fn resolve(&self, reference: &str) -> Option<PathBuf> {
         let path = Path::new(reference);
-        if path.is_absolute() {
+        // 冒号只可能来自 Windows 盘符。别的平台不认为那是绝对路径，所以单独挡一次，
+        // 让同一份文件在哪个系统上读都走同一条判断。
+        if reference.contains(':') || path.is_absolute() {
             return None;
         }
         if path.components().any(|part| {
