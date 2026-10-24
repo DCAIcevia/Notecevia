@@ -3,6 +3,7 @@
 //! 界面：把状态映射成画面。
 
 pub mod board;
+pub mod chrome;
 pub mod strings;
 pub mod theme;
 

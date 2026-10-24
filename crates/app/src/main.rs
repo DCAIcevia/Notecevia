@@ -71,6 +71,7 @@ fn main() -> eframe::Result {
     let mut dark = false;
     let mut stress = false;
     let mut edit = false;
+    let mut select = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -78,6 +79,7 @@ fn main() -> eframe::Result {
             Some("--dark") => dark = true,
             Some("--stress") => stress = true,
             Some("--edit") => edit = true,
+            Some("--select") => select = true,
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -123,6 +125,9 @@ fn main() -> eframe::Result {
             }
             if stress {
                 board.spawn_stress();
+            }
+            if select {
+                board.select_first();
             }
             if edit {
                 board.begin_editing_first();

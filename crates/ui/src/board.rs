@@ -9,7 +9,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Str
 
 use notecevia_core::board::{Document, Geometry};
 
-use crate::{strings, theme};
+use crate::{chrome, strings, theme};
 
 /// 缩放范围。再小看不清，再大失去意义。
 const MIN_ZOOM: f32 = 0.15;
@@ -91,6 +91,13 @@ impl BoardApp {
         self.dirty = false;
     }
 
+    /// 选中第一块，不进入编辑。给命令行验证操作条用。
+    pub fn select_first(&mut self) {
+        if let Some(entry) = self.document.board.entries.first() {
+            self.selected = Some(entry.id);
+        }
+    }
+
     /// 从第一块开始编辑。给命令行验证用，也因为以后要能从键盘直接进入编辑。
     pub fn begin_editing_first(&mut self) {
         if let Some(entry) = self.document.board.entries.first() {
@@ -102,7 +109,12 @@ impl BoardApp {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.visuals().dark_mode);
-        let rect = ui.max_rect();
+        let window = ui.max_rect();
+        let top = Rect::from_min_size(
+            window.min,
+            Vec2::new(window.width(), chrome::TOP_BAR_HEIGHT),
+        );
+        let rect = Rect::from_min_max(Pos2::new(window.min.x, top.max.y), window.max);
         let clip = ui.clip_rect().intersect(rect);
 
         // 先登记背景，再登记块：后登记的在上，块会拿走落在它身上的点击。
@@ -111,9 +123,17 @@ impl BoardApp {
 
         ui.painter()
             .rect_filled(rect, CornerRadius::ZERO, palette.canvas);
+        let state = if self.dirty {
+            strings::UNSAVED.to_owned()
+        } else {
+            self.status.clone().unwrap_or_default()
+        };
+        chrome::top_bar(ui, &palette, top, &self.document.board.title, &state);
+
         self.interact_blocks(ui, clip);
         self.paint_blocks(ui, &palette, clip);
         self.edit_text(ui, &palette);
+        self.style_toolbar(ui, &palette);
         self.paint_hud(ui, &palette, rect);
     }
 
@@ -267,7 +287,9 @@ impl BoardApp {
 
             if self.editing != Some(entry.id) {
                 let text = self.document.text_of(entry.id);
-                paint_text(&painter, screen, text, zoom, palette.text);
+                let size = self.block_size(entry.id);
+                let color = self.block_color(entry.id, palette);
+                paint_text(&painter, screen, text, zoom, size, color);
             }
         }
     }
@@ -291,7 +313,8 @@ impl BoardApp {
         let screen = self
             .view
             .rect_to_screen(rect_of(self.document.board.entries[index].geometry));
-        let font = FontId::proportional((theme::BLOCK_FONT * zoom).max(4.0));
+        let font = FontId::proportional((self.block_size(block) * zoom).max(4.0));
+        let text_color = self.block_color(block, palette);
 
         // 编辑框按矩形定位，不用 TextEdit 自己的内边距：静态文字是 galley 偏移，
         // 两条路径必须从「块左上角 + 内边距」这同一个点开始，否则一进编辑文字就跳。
@@ -304,7 +327,7 @@ impl BoardApp {
             let editor = egui::TextEdit::multiline(text)
                 .id(editor_id)
                 .font(font)
-                .text_color(palette.text)
+                .text_color(text_color)
                 .background_color(palette.block_fill)
                 .margin(egui::Margin::ZERO)
                 .frame(egui::Frame::NONE)
@@ -349,14 +372,7 @@ impl BoardApp {
             palette,
         );
 
-        let mut right = format!("{:.0}%   {:.0} fps", self.view.zoom * 100.0, self.fps);
-        if self.dirty {
-            right.push_str("   未保存");
-        }
-        if let Some(status) = &self.status {
-            right.push_str("   ");
-            right.push_str(status);
-        }
+        let right = format!("{:.0}%   {:.0} fps", self.view.zoom * 100.0, self.fps);
         let anchor = rect.right_bottom() + Vec2::new(-theme::HINT_INSET, -theme::HINT_INSET);
         paint_chip(
             painter,
@@ -366,6 +382,50 @@ impl BoardApp {
             &font,
             palette,
         );
+    }
+
+    /// 一块的字号。没设过就用主题默认值。
+    fn block_size(&self, id: u64) -> f32 {
+        self.document
+            .texts
+            .get(&id)
+            .and_then(|block| block.size)
+            .unwrap_or(theme::BLOCK_FONT)
+    }
+
+    /// 一块的颜色。没设过就跟随主题，浅色深色都好看。
+    fn block_color(&self, id: u64, palette: &theme::Palette) -> Color32 {
+        self.document
+            .texts
+            .get(&id)
+            .and_then(|block| block.color)
+            .map_or(palette.text, |[r, g, b]| Color32::from_rgb(r, g, b))
+    }
+
+    /// 选中一块时在它上方浮出格式操作条。编辑文字时不出现，免得抢焦点。
+    fn style_toolbar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
+        if self.editing.is_some() {
+            return;
+        }
+        let Some(selected) = self.selected else {
+            return;
+        };
+        let Some(entry) = self
+            .document
+            .board
+            .entries
+            .iter()
+            .find(|entry| entry.id == selected)
+        else {
+            return;
+        };
+        let screen = self.view.rect_to_screen(rect_of(entry.geometry));
+        let Some(block) = self.document.texts.get_mut(&selected) else {
+            return;
+        };
+        if chrome::style_toolbar(ui, palette, screen, block) {
+            self.dirty = true;
+        }
     }
 
     // ---- 内容 ----
@@ -422,11 +482,18 @@ fn translate(geometry: Geometry, delta: Vec2) -> Geometry {
     )
 }
 
-fn paint_text(painter: &egui::Painter, screen: Rect, text: &str, zoom: f32, color: Color32) {
+fn paint_text(
+    painter: &egui::Painter,
+    screen: Rect,
+    text: &str,
+    zoom: f32,
+    size: f32,
+    color: Color32,
+) {
     if text.is_empty() {
         return;
     }
-    let font = FontId::proportional((theme::BLOCK_FONT * zoom).max(4.0));
+    let font = FontId::proportional((size * zoom).max(4.0));
     let pad = theme::BLOCK_PAD * zoom;
     let wrap = (screen.width() - 2.0 * pad).max(8.0);
     let galley = painter.layout(text.to_owned(), font, color, wrap);

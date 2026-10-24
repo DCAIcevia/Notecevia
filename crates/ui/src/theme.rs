@@ -26,6 +26,19 @@ pub const SELECTED_EDGE_WIDTH: f32 = 2.0;
 pub const HINT_INSET: f32 = 12.0;
 pub const HINT_PAD: f32 = 6.0;
 
+/// 界面里能选的文字字号，单位是世界坐标里的点。
+pub const TEXT_SIZES: [f32; 6] = [12.0, 14.0, 16.0, 20.0, 26.0, 34.0];
+
+/// 界面里能选的文字颜色。None 表示跟随主题，浅色深色都好看。
+pub const TEXT_COLORS: [Option<[u8; 3]>; 6] = [
+    None,
+    Some([206, 84, 76]),
+    Some([206, 146, 62]),
+    Some([74, 154, 100]),
+    Some([70, 120, 214]),
+    Some([142, 116, 214]),
+];
+
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
