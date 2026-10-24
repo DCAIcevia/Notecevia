@@ -5,22 +5,50 @@
 use std::path::PathBuf;
 
 use eframe::egui;
+use notecevia_core::Document;
+use notecevia_store::Workspace;
+use notecevia_ui::BoardApp;
 
 struct App {
-    board: notecevia_ui::BoardApp,
+    board: BoardApp,
+    workspace: Option<Workspace>,
+    /// 旧文件打不开时关掉写盘，免得用空画板盖掉用户原来那份。
+    can_save: bool,
     /// 给了路径就截一张图再退出，用来在没有显示器的地方检查界面。
     shot: Option<PathBuf>,
     frames: u32,
+}
+
+impl App {
+    fn save(&mut self) {
+        let (Some(workspace), true) = (&self.workspace, self.can_save) else {
+            return;
+        };
+        match workspace.save(self.board.document()) {
+            Ok(()) => {
+                self.board.mark_saved();
+                self.board.set_status("已保存");
+            }
+            Err(error) => self.board.set_status(format!("保存失败：{error}")),
+        }
+    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.board.ui(ui);
 
+        let ctx = ui.ctx().clone();
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
+            self.save();
+        }
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.save();
+        }
+
         let Some(path) = self.shot.clone() else {
             return;
         };
-        let ctx = ui.ctx().clone();
         self.frames += 1;
         ctx.request_repaint();
         if self.frames == 25 {
@@ -39,20 +67,17 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
-    let mut image = None;
     let mut shot = None;
     let mut dark = false;
     let mut stress = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--shot" {
-            shot = args.next().map(PathBuf::from);
-        } else if arg == "--dark" {
-            dark = true;
-        } else if arg == "--stress" {
-            stress = true;
-        } else {
-            image = Some(PathBuf::from(arg));
+        match arg.to_str() {
+            Some("--shot") => shot = args.next().map(PathBuf::from),
+            Some("--dark") => dark = true,
+            Some("--stress") => stress = true,
+            Some(other) => eprintln!("忽略不认识的参数：{other}"),
+            None => {}
         }
     }
 
@@ -70,12 +95,37 @@ fn main() -> eframe::Result {
             if dark {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
-            let mut board = notecevia_ui::BoardApp::new(&cc.egui_ctx, image.as_deref());
+
+            let root = notecevia_store::workspace_root();
+            let (workspace, document, can_save, status) = match Workspace::open(&root) {
+                Ok(workspace) => match workspace.load() {
+                    Ok(document) => (Some(workspace), document, true, None),
+                    Err(error) => (
+                        Some(workspace),
+                        Document::new("画板"),
+                        false,
+                        Some(format!("打开失败，本次不写盘：{error}")),
+                    ),
+                },
+                Err(error) => (
+                    None,
+                    Document::new("画板"),
+                    false,
+                    Some(format!("工作区打不开：{error}")),
+                ),
+            };
+
+            let mut board = BoardApp::new(document);
+            if let Some(status) = status {
+                board.set_status(status);
+            }
             if stress {
                 board.spawn_stress();
             }
             Ok(Box::new(App {
                 board,
+                workspace,
+                can_save,
                 shot,
                 frames: 0,
             }))

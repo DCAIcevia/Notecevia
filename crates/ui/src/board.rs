@@ -7,6 +7,8 @@
 
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
+use notecevia_core::board::{Document, Geometry};
+
 use crate::{strings, theme};
 
 /// 缩放范围。再小看不清，再大失去意义。
@@ -14,22 +16,9 @@ const MIN_ZOOM: f32 = 0.15;
 const MAX_ZOOM: f32 = 6.0;
 /// 新块的默认世界尺寸。
 const NEW_TEXT_SIZE: Vec2 = Vec2::new(320.0, 120.0);
-
-/// 一块内容的种类。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Text,
-    Image,
-    Media,
-}
-
-struct Block {
-    id: u64,
-    kind: Kind,
-    /// 世界坐标里的矩形，与缩放无关。
-    rect: Rect,
-    text: String,
-}
+/// 视图复位后的状态。
+const DEFAULT_ORIGIN: Pos2 = Pos2::new(160.0, 140.0);
+const DEFAULT_ZOOM: f32 = 1.0;
 
 /// 视口：世界坐标与屏幕坐标之间的换算。
 struct View {
@@ -39,6 +28,13 @@ struct View {
 }
 
 impl View {
+    fn restored() -> Self {
+        Self {
+            origin: DEFAULT_ORIGIN,
+            zoom: DEFAULT_ZOOM,
+        }
+    }
+
     fn to_screen(&self, point: Pos2) -> Pos2 {
         self.origin + point.to_vec2() * self.zoom
     }
@@ -52,39 +48,44 @@ impl View {
     }
 }
 
-/// 原型界面：一张画布加若干块内容。
+/// 画布界面。数据在 Document 里，这里只管怎么显示、怎么改。
 pub struct BoardApp {
     view: View,
-    blocks: Vec<Block>,
+    document: Document,
     editing: Option<u64>,
     selected: Option<u64>,
     hovered: Option<u64>,
-    next_id: u64,
-    texture: Option<egui::TextureHandle>,
-    image_note: Option<String>,
+    status: Option<String>,
     fps: f32,
+    dirty: bool,
 }
 
 impl BoardApp {
-    /// 建立界面。image 给定时解码该文件，否则用程序生成的测试图。
-    pub fn new(ctx: &egui::Context, image: Option<&std::path::Path>) -> Self {
-        let mut app = Self {
-            view: View {
-                origin: Pos2::new(160.0, 140.0),
-                zoom: 1.0,
-            },
-            blocks: Vec::new(),
+    pub fn new(document: Document) -> Self {
+        Self {
+            view: View::restored(),
+            document,
             editing: None,
             selected: None,
             hovered: None,
-            next_id: 1,
-            texture: None,
-            image_note: None,
+            status: None,
             fps: 0.0,
-        };
-        app.load_image(ctx, image);
-        app.reset_blocks();
-        app
+            dirty: false,
+        }
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.document
+    }
+
+    /// 在右下角显示一条状态，比如保存结果。
+    pub fn set_status(&mut self, status: impl Into<String>) {
+        self.status = Some(status.into());
+    }
+
+    /// 存过盘之后调用，清掉未保存标记。
+    pub fn mark_saved(&mut self) {
+        self.dirty = false;
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -120,8 +121,15 @@ impl BoardApp {
             && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
         {
             let world = self.view.to_world(pointer);
-            let id = self.push_text(world, NEW_TEXT_SIZE, "");
-            self.editing = Some(id);
+            let block = self.document.add_text(Geometry::new(
+                world.x,
+                world.y,
+                NEW_TEXT_SIZE.x,
+                NEW_TEXT_SIZE.y,
+            ));
+            self.selected = Some(block);
+            self.editing = Some(block);
+            self.dirty = true;
         }
 
         if ui.rect_contains_pointer(rect) {
@@ -136,7 +144,7 @@ impl BoardApp {
             }
         }
 
-        let (escape, delete, stress, reset) = ui.input(|i| {
+        let (escape, delete, stress, reset_view) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Escape),
                 i.key_pressed(egui::Key::Delete),
@@ -150,16 +158,17 @@ impl BoardApp {
         }
         if delete
             && !ui.ctx().egui_wants_keyboard_input()
-            && let Some(id) = self.selected
+            && let Some(block) = self.selected
         {
-            self.blocks.retain(|block| block.id != id);
+            self.document.remove_block(block);
             self.selected = None;
+            self.dirty = true;
         }
         if stress {
             self.spawn_stress();
         }
-        if reset {
-            self.reset_blocks();
+        if reset_view {
+            self.view = View::restored();
         }
     }
 
@@ -174,33 +183,34 @@ impl BoardApp {
 
     fn interact_blocks(&mut self, ui: &egui::Ui, clip: Rect) {
         let mut responses = Vec::new();
-        for index in 0..self.blocks.len() {
-            let screen = self.view.rect_to_screen(self.blocks[index].rect);
+        for index in 0..self.document.board.entries.len() {
+            let entry = &self.document.board.entries[index];
+            let screen = self.view.rect_to_screen(rect_of(entry.geometry));
             if !clip.intersects(screen) {
                 continue;
             }
-            let id = ui.scope_id().with(("block", self.blocks[index].id));
-            let response = ui.interact(screen, id, Sense::click_and_drag());
-            responses.push((index, response));
+            let id = ui.scope_id().with(("block", entry.id));
+            responses.push((index, ui.interact(screen, id, Sense::click_and_drag())));
         }
 
         self.hovered = None;
         for (index, response) in responses {
-            let id = self.blocks[index].id;
+            let block = self.document.board.entries[index].id;
             if response.hovered() || response.dragged() {
-                self.hovered = Some(id);
+                self.hovered = Some(block);
             }
-            if response.dragged() && self.editing != Some(id) {
+            if response.dragged() && self.editing != Some(block) {
                 let delta = response.drag_delta() / self.view.zoom;
-                let moved = self.blocks[index].rect.translate(delta);
-                self.blocks[index].rect = moved;
+                let entry = &mut self.document.board.entries[index];
+                entry.geometry = translate(entry.geometry, delta);
+                self.dirty = true;
             }
             if response.clicked() {
-                self.selected = Some(id);
+                self.selected = Some(block);
             }
-            if response.double_clicked() && self.blocks[index].kind == Kind::Text {
-                self.selected = Some(id);
-                self.editing = Some(id);
+            if response.double_clicked() {
+                self.selected = Some(block);
+                self.editing = Some(block);
             }
         }
     }
@@ -211,14 +221,14 @@ impl BoardApp {
         let painter = ui.painter().with_clip_rect(clip);
         let zoom = self.view.zoom;
 
-        for block in &self.blocks {
-            let screen = self.view.rect_to_screen(block.rect);
+        for entry in &self.document.board.entries {
+            let screen = self.view.rect_to_screen(rect_of(entry.geometry));
             if !clip.intersects(screen) {
                 continue;
             }
 
-            let selected = self.selected == Some(block.id);
-            let hovered = self.hovered == Some(block.id);
+            let selected = self.selected == Some(entry.id);
+            let hovered = self.hovered == Some(entry.id);
             let edge = if selected {
                 palette.selected_edge
             } else if hovered {
@@ -231,71 +241,63 @@ impl BoardApp {
             } else {
                 theme::EDGE_WIDTH
             } * zoom;
-            let fill = if block.kind == Kind::Media {
-                palette.media_fill
-            } else {
-                palette.block_fill
-            };
             let radius = CornerRadius::same((theme::BLOCK_RADIUS * zoom).round() as u8);
 
             painter.rect(
                 screen,
                 radius,
-                fill,
+                palette.block_fill,
                 Stroke::new(width, edge),
                 StrokeKind::Inside,
             );
 
-            match block.kind {
-                Kind::Text => {
-                    if self.editing != Some(block.id) {
-                        paint_text(&painter, screen, &block.text, zoom, palette.text);
-                    }
-                }
-                Kind::Image => {
-                    if let Some(texture) = &self.texture {
-                        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-                        painter.image(texture.id(), screen, uv, Color32::WHITE);
-                    }
-                }
-                Kind::Media => {
-                    paint_play(&painter, screen, zoom, palette.muted);
-                    let label = FontId::proportional((theme::SMALL_FONT * zoom).max(4.0));
-                    let position = screen.center() + Vec2::new(0.0, 34.0 * zoom);
-                    painter.text(
-                        position,
-                        Align2::CENTER_CENTER,
-                        &block.text,
-                        label,
-                        palette.muted,
-                    );
-                }
+            if self.editing != Some(entry.id) {
+                let text = self.document.text_of(entry.id);
+                paint_text(&painter, screen, text, zoom, palette.text);
             }
         }
     }
 
     fn edit_text(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
-        let Some(id) = self.editing else { return };
-        let Some(index) = self.blocks.iter().position(|block| block.id == id) else {
+        let Some(block) = self.editing else {
+            return;
+        };
+        let Some(index) = self
+            .document
+            .board
+            .entries
+            .iter()
+            .position(|entry| entry.id == block)
+        else {
             self.editing = None;
             return;
         };
 
         let zoom = self.view.zoom;
-        let screen = self.view.rect_to_screen(self.blocks[index].rect);
-        let font = FontId::proportional((theme::BLOCK_FONT * zoom).max(4.0));
+        let screen = self
+            .view
+            .rect_to_screen(rect_of(self.document.board.entries[index].geometry));
         let margin = theme::BLOCK_PAD * zoom;
-        let editor = egui::TextEdit::multiline(&mut self.blocks[index].text)
-            .id(ui.scope_id().with(("editor", id)))
-            .font(font)
-            .text_color(palette.text)
-            .background_color(palette.block_fill)
-            .margin(egui::Margin::same(margin.round() as i8))
-            .frame(egui::Frame::NONE)
-            .desired_width((screen.width() - 2.0 * margin).max(8.0))
-            .desired_rows(1);
+        let font = FontId::proportional((theme::BLOCK_FONT * zoom).max(4.0));
+        let desired_width = (screen.width() - 2.0 * margin).max(8.0);
 
-        let response = ui.put(screen, editor);
+        let response = {
+            let text = &mut self.document.text_mut(block).text;
+            let editor = egui::TextEdit::multiline(text)
+                .id(ui.scope_id().with(("editor", block)))
+                .font(font)
+                .text_color(palette.text)
+                .background_color(palette.block_fill)
+                .margin(egui::Margin::same(margin.round() as i8))
+                .frame(egui::Frame::NONE)
+                .desired_width(desired_width)
+                .desired_rows(1);
+            ui.put(screen, editor)
+        };
+
+        if response.changed() {
+            self.dirty = true;
+        }
         if response.lost_focus() {
             self.editing = None;
         }
@@ -310,80 +312,38 @@ impl BoardApp {
             self.fps * 0.9 + instant * 0.1
         };
 
-        let mut hint = format!(
-            "{}    {:.0}%   {:.0} fps",
-            strings::BOARD_HINT,
-            self.view.zoom * 100.0,
-            self.fps
-        );
-        if let Some(note) = &self.image_note {
-            hint.push_str("    ");
-            hint.push_str(note);
-        }
-
-        let position = rect.left_bottom() + Vec2::new(theme::HINT_INSET, -theme::HINT_INSET);
+        let painter = ui.painter();
         let font = FontId::proportional(theme::SMALL_FONT);
-        ui.painter()
-            .text(position, Align2::LEFT_BOTTOM, hint, font, palette.muted);
+        let bottom = rect.left_bottom() + Vec2::new(theme::HINT_INSET, -theme::HINT_INSET);
+        paint_chip(
+            painter,
+            bottom,
+            Align2::LEFT_BOTTOM,
+            strings::BOARD_HINT,
+            &font,
+            palette,
+        );
+
+        let mut right = format!("{:.0}%   {:.0} fps", self.view.zoom * 100.0, self.fps);
+        if self.dirty {
+            right.push_str("   未保存");
+        }
+        if let Some(status) = &self.status {
+            right.push_str("   ");
+            right.push_str(status);
+        }
+        let anchor = rect.right_bottom() + Vec2::new(-theme::HINT_INSET, -theme::HINT_INSET);
+        paint_chip(
+            painter,
+            anchor,
+            Align2::RIGHT_BOTTOM,
+            &right,
+            &font,
+            palette,
+        );
     }
 
     // ---- 内容 ----
-
-    fn push_text(&mut self, min: Pos2, size: Vec2, text: &str) -> u64 {
-        let id = self.next_block_id();
-        self.blocks.push(Block {
-            id,
-            kind: Kind::Text,
-            rect: Rect::from_min_size(min, size),
-            text: text.to_owned(),
-        });
-        id
-    }
-
-    fn push_media(&mut self, min: Pos2, size: Vec2, label: &str) {
-        let id = self.next_block_id();
-        self.blocks.push(Block {
-            id,
-            kind: Kind::Media,
-            rect: Rect::from_min_size(min, size),
-            text: label.to_owned(),
-        });
-    }
-
-    fn push_image(&mut self, min: Pos2, size: Vec2) {
-        let id = self.next_block_id();
-        self.blocks.push(Block {
-            id,
-            kind: Kind::Image,
-            rect: Rect::from_min_size(min, size),
-            text: String::new(),
-        });
-    }
-
-    fn next_block_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn reset_blocks(&mut self) {
-        self.blocks.clear();
-        self.editing = None;
-        self.selected = None;
-        self.hovered = None;
-        self.next_id = 1;
-        self.push_text(
-            Pos2::new(0.0, 0.0),
-            Vec2::new(320.0, 140.0),
-            "双击开始编辑：中文输入、选区、复制、撤销都在这里试。",
-        );
-        self.push_media(
-            Pos2::new(0.0, 180.0),
-            Vec2::new(320.0, 180.0),
-            "视频块 · 待接入",
-        );
-        self.push_image(Pos2::new(360.0, 0.0), Vec2::new(420.0, 300.0));
-    }
 
     /// 一千块铺满当前视口与下方，用来量拖动与缩放时的帧率。
     pub fn spawn_stress(&mut self) {
@@ -392,41 +352,49 @@ impl BoardApp {
         for index in 0..1000 {
             let x = start.x + (index % columns) as f32 * 70.0;
             let y = start.y + (index / columns) as f32 * 55.0;
-            let min = Pos2::new(x, y);
-            let size = Vec2::new(62.0, 47.0);
-            if index % 3 == 0 {
-                self.push_text(min, size, &format!("块 {index}"));
-            } else {
-                self.push_media(min, size, "占位");
-            }
+            let block = self.document.add_text(Geometry::new(x, y, 62.0, 47.0));
+            self.document.text_mut(block).text = format!("块 {index}");
         }
-    }
-
-    // ---- 图片 ----
-
-    fn load_image(&mut self, ctx: &egui::Context, path: Option<&std::path::Path>) {
-        let (image, note) = match path {
-            Some(path) => match load_color_image(path) {
-                Ok(image) => (image, None),
-                Err(note) => (sample_image(), Some(note)),
-            },
-            None => (sample_image(), None),
-        };
-        self.texture = Some(ctx.load_texture("board-image", image, egui::TextureOptions::LINEAR));
-        self.image_note = note;
+        self.dirty = true;
     }
 }
 
-/// 播放三角用图形画，不借字符——字符会落到彩色表情字体上，颜色和尺寸都不受控。
-fn paint_play(painter: &egui::Painter, screen: Rect, zoom: f32, color: Color32) {
-    let center = screen.center() - Vec2::new(0.0, 6.0 * zoom);
-    let size = 14.0 * zoom;
-    let points = vec![
-        center + Vec2::new(-size * 0.5, -size),
-        center + Vec2::new(-size * 0.5, size),
-        center + Vec2::new(size, 0.0),
-    ];
-    painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+/// 画一条底部提示。叠在内容上时先铺一层画布底色，否则字和块糊在一起。
+fn paint_chip(
+    painter: &egui::Painter,
+    anchor: Pos2,
+    align: Align2,
+    text: &str,
+    font: &FontId,
+    palette: &theme::Palette,
+) {
+    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), palette.muted);
+    let rect = align.anchor_size(anchor, galley.size());
+    let [r, g, b, _] = palette.canvas.to_srgba_unmultiplied();
+    let backdrop = Color32::from_rgba_unmultiplied(r, g, b, 224);
+    let padding = Vec2::new(theme::HINT_PAD, theme::HINT_PAD / 2.0);
+    painter.rect_filled(
+        rect.expand2(padding),
+        CornerRadius::same((theme::BLOCK_RADIUS * 0.5).round() as u8),
+        backdrop,
+    );
+    painter.galley(rect.min, galley, palette.muted);
+}
+
+fn rect_of(geometry: Geometry) -> Rect {
+    Rect::from_min_size(
+        Pos2::new(geometry.x, geometry.y),
+        Vec2::new(geometry.width, geometry.height),
+    )
+}
+
+fn translate(geometry: Geometry, delta: Vec2) -> Geometry {
+    Geometry::new(
+        geometry.x + delta.x,
+        geometry.y + delta.y,
+        geometry.width,
+        geometry.height,
+    )
 }
 
 fn paint_text(painter: &egui::Painter, screen: Rect, text: &str, zoom: f32, color: Color32) {
@@ -440,48 +408,12 @@ fn paint_text(painter: &egui::Painter, screen: Rect, text: &str, zoom: f32, colo
     painter.galley(screen.min + Vec2::splat(pad), galley, color);
 }
 
-fn load_color_image(path: &std::path::Path) -> Result<egui::ColorImage, String> {
-    let image = image::open(path).map_err(|error| format!("图片读取失败：{error}"))?;
-    let rgba = image.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
-    Ok(egui::ColorImage::from_rgba_unmultiplied(
-        size,
-        rgba.as_raw(),
-    ))
-}
-
-/// 程序生成的测试图：左半是四像素竖条，右半是棋盘，用来看缩放时的采样质量。
-fn sample_image() -> egui::ColorImage {
-    const W: usize = 320;
-    const H: usize = 240;
-    let mut pixels = Vec::with_capacity(W * H);
-    for y in 0..H {
-        for x in 0..W {
-            let color = if x == 0 || y == 0 || x == W - 1 || y == H - 1 {
-                Color32::WHITE
-            } else if x < W / 2 {
-                if (x / 4) % 2 == 0 {
-                    Color32::from_rgb(236, 236, 236)
-                } else {
-                    Color32::from_rgb(24, 24, 24)
-                }
-            } else if (x / 32 + y / 32) % 2 == 0 {
-                Color32::from_rgb(72, 108, 168)
-            } else {
-                Color32::from_rgb(30, 36, 46)
-            };
-            pixels.push(color);
-        }
-    }
-    egui::ColorImage::new([W, H], pixels)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn board() -> BoardApp {
-        BoardApp::new(&egui::Context::default(), None)
+        BoardApp::new(Document::new("测试画板"))
     }
 
     #[test]
@@ -515,5 +447,12 @@ mod tests {
             app.zoom_at(pointer, 0.25);
         }
         assert!((app.view.zoom - MIN_ZOOM).abs() < 0.001);
+    }
+
+    #[test]
+    fn geometry_survives_a_translation() {
+        let geometry = Geometry::new(10.0, 20.0, 30.0, 40.0);
+        let moved = translate(geometry, Vec2::new(5.0, -5.0));
+        assert_eq!(moved, Geometry::new(15.0, 15.0, 30.0, 40.0));
     }
 }

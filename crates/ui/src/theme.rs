@@ -24,6 +24,7 @@ pub const BLOCK_RADIUS: f32 = 8.0;
 pub const EDGE_WIDTH: f32 = 1.0;
 pub const SELECTED_EDGE_WIDTH: f32 = 2.0;
 pub const HINT_INSET: f32 = 12.0;
+pub const HINT_PAD: f32 = 6.0;
 
 pub fn palette(dark: bool) -> Palette {
     if dark {

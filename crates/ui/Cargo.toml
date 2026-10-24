@@ -7,4 +7,3 @@ license.workspace = true
 [dependencies]
 notecevia-core = { path = "../core" }
 egui.workspace = true
-image.workspace = true
