@@ -515,7 +515,7 @@ impl BoardApp {
                     &painter,
                     block,
                     rotation,
-                    Stroke::new(theme::EDGE_WIDTH * zoom, palette.selected_edge),
+                    Stroke::new(theme::EDGE_WIDTH * zoom, palette.text),
                     zoom,
                 );
             }

@@ -123,11 +123,7 @@ pub fn style_toolbar(
         };
         painter.circle_filled(center, SWATCH / 2.0, fill);
         if style.color == *color {
-            painter.circle_stroke(
-                center,
-                SWATCH / 2.0 + 2.0,
-                Stroke::new(1.0, palette.selected_edge),
-            );
+            painter.circle_stroke(center, SWATCH / 2.0 + 2.0, Stroke::new(1.0, palette.text));
         } else if response.hovered() {
             painter.circle_stroke(
                 center,

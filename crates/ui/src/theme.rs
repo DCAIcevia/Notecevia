@@ -11,7 +11,6 @@ pub struct Palette {
     pub media_fill: Color32,
     pub edge: Color32,
     pub hover_edge: Color32,
-    pub selected_edge: Color32,
     pub text: Color32,
     pub muted: Color32,
 }
@@ -52,7 +51,6 @@ pub fn palette(dark: bool) -> Palette {
             media_fill: Color32::from_rgb(43, 43, 48),
             edge: Color32::from_rgb(52, 52, 58),
             hover_edge: Color32::from_rgb(78, 78, 86),
-            selected_edge: Color32::from_rgb(168, 139, 250),
             text: Color32::from_rgb(233, 233, 236),
             muted: Color32::from_rgb(142, 142, 150),
         }
@@ -63,7 +61,6 @@ pub fn palette(dark: bool) -> Palette {
             media_fill: Color32::from_rgb(235, 235, 238),
             edge: Color32::from_rgb(224, 224, 229),
             hover_edge: Color32::from_rgb(196, 196, 203),
-            selected_edge: Color32::from_rgb(124, 92, 214),
             text: Color32::from_rgb(28, 28, 31),
             muted: Color32::from_rgb(110, 110, 118),
         }
