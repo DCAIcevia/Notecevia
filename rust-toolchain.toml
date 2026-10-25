@@ -1,0 +1,5 @@
+[toolchain]
+# 版本固定，本地与 CI 使用同一工具链；升级时只改这一处。
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
