@@ -23,7 +23,7 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path target/release/notecevia.exe -DestinationPath notecevia-${{ github.ref_name }}-windows.zip
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: notecevia-${{ github.ref_name }}-windows.zip
           generate_release_notes: true
