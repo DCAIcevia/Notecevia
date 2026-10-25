@@ -1,6 +1,6 @@
 # 参与开发
 
-仓库由 acvrac 维护，`main` 受保护：禁止直接推送与强推，改动一律走分支与合并请求，合并方式只允许 merge commit，并且需要一名维护者批准。
+仓库由 HanYang06 维护，`main` 受保护：禁止直接推送与强推，改动一律走分支与合并请求，合并方式只允许 merge commit，并且需要一名维护者批准。
 
 ## 开工前
 
@@ -15,9 +15,22 @@
 3. 提交信息用 Conventional Commits，主题为中文，格式 `<type>(<scope>): <主题>`。
 4. 推送前三条门禁全绿，并自测受影响的界面或数据路径。
 
+## 贡献授权
+
+提交的改动按 Apache-2.0 授权给本项目（根目录 `LICENSE` 已覆盖入站贡献），无需签署 CLA 或 DCO。改动带来新的第三方代码、字体或其他素材时，在同一个提交里更新 `THIRD_PARTY_LICENSES.md`。
+
 ## 依赖
 
 新增依赖需同时满足：许可证在 `deny.toml` 的允许列表内，来源为 crates.io。审计工作流每周运行一次，列表外的许可证会使审计失败；确认可以接受后，把许可证加入 `deny.toml`。
+
+`THIRD_PARTY_LICENSES.md` 由 `cargo about` 从当前依赖图生成，随二进制一起分发。依赖变化后重新生成并一并提交：
+
+```bash
+cargo install cargo-about --version 0.9.2 --locked --features cli
+cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
+```
+
+`about.toml` 的允许列表与 `deny.toml` 保持一致，出现列表外的许可证时生成失败；目标固定为 `x86_64-pc-windows-msvc`，换平台生成结果相同。发布流程会重新生成并比对，不一致即失败。
 
 ## 评审
 
