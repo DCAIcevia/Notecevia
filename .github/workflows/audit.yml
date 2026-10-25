@@ -26,5 +26,5 @@ jobs:
       - name: 审计
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          # 已知漏洞与依赖来源；许可证策略尚未确定，暂不检查。
-          command: check advisories sources
+          # 已知漏洞、许可证与依赖来源。
+          command: check advisories licenses sources

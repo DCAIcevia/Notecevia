@@ -37,6 +37,7 @@ cargo test --workspace
 - `clippy` 带 `-D warnings`，警告即失败；`fmt` 只检查，改写用 `cargo fmt --all`。
 - 工具链由 `rust-toolchain.toml` 固定，rustup 按该文件选择版本；workspace 用 `edition = "2024"`。
 - 三条命令即 CI 门禁：推送 `main` 与合并请求时在 Ubuntu、Windows 上各跑一遍，CI 里的命令带 `--locked`。
+- 依赖审计由 `.github/workflows/audit.yml` 定时运行，许可证允许列表在 `deny.toml`。
 
 ## 结构
 
