@@ -5,7 +5,7 @@ description: 在 Notecevia 仓库里提交改动、拆分提交、写提交信�
 
 # Git 提交
 
-仓库由他人维护（acvrac），`main` 上有 ruleset 保护：禁止直接推送、禁止强推、必须走 PR 且至少一个批准、合并方式只允许 merge commit。这不是本项目的偏好，是仓库的硬约束——直接推会被 GitHub 拒绝，所以流程只能照它来。
+仓库由他人维护（HanYang06），`main` 上有 ruleset 保护：禁止直接推送、禁止强推、必须走 PR 且至少一个批准、合并方式只允许 merge commit。这不是本项目的偏好，是仓库的硬约束——直接推会被 GitHub 拒绝，所以流程只能照它来。
 
 ## 提交前先看仓库
 
@@ -49,7 +49,7 @@ scope：`core`、`store`、`ui`、`app`、`skills`、`ci`；跨模块时省略�
 
 改动一律走短分支：`<type>/<scope>-<主题>`，kebab-case、≤48 字符，例如 `feat/editor-autosave`。分支名要让人一眼看出对应什么工作，所以禁用 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
 
-流程：推分支 → 开 PR → 至少一个批准（acvrac）→ merge commit 合并 → 删除分支。
+流程：推分支 → 开 PR → 至少一个批准（HanYang06）→ merge commit 合并 → 删除分支。
 
 一个里程碑一个 PR：改动先在分支上累积，达到里程碑的退出标准再合并；不要每件事开一个 PR。仓库没有开启合并后自动删分支，所以要自己删。
 
