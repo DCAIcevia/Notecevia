@@ -1,0 +1,30 @@
+name: Audit
+
+on:
+  schedule:
+    - cron: "30 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: 依赖审计
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 审计
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # 已知漏洞与依赖来源；许可证策略尚未确定，暂不检查。
+          command: check advisories sources

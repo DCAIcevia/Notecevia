@@ -1,0 +1,11 @@
+# cargo-deny 配置；检查项由 .github/workflows/audit.yml 指定。
+
+[advisories]
+# 传递依赖里的 unmaintained 不报错，只对工作区直接依赖报错。
+unmaintained = "workspace"
+yanked = "warn"
+
+[sources]
+# 依赖只允许来自 crates.io。
+unknown-registry = "deny"
+unknown-git = "deny"

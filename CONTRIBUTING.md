@@ -6,6 +6,8 @@
 
 读 `AGENTS.md`。规则只在 `.agents/skills/` 里，按 `AGENTS.md` 的加载表读对应 skill：总规则、提交与发布、界面设计、skill 写法各有入口。
 
+工具链由仓库根的 `rust-toolchain.toml` 固定，rustup 按该文件选择工具链，本地与 CI 一致。
+
 ## 提交流程
 
 1. 从 `main` 拉短分支，命名 `<type>/<scope>-<主题>`，例如 `feat/ui-board-canvas`。
@@ -21,3 +23,5 @@
 ## 发布
 
 推 `v*` 标签触发发布流程：CI 跑门禁、构建、打包并创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。
+
+发布流程校验标签与 `notecevia-app` 的版本一致，不一致即失败；产物附 SHA256 校验和。
