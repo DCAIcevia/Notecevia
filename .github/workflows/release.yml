@@ -39,6 +39,15 @@ jobs:
             throw "标签 $env:GITHUB_REF_NAME 与 notecevia-app 版本 $version 不一致"
           }
           Write-Output "标签与版本一致：$version"
+      - name: 校验三方许可
+        shell: pwsh
+        run: |
+          # 版本与 CONTRIBUTING 记录的生成命令一致；升级 cargo-about 时两处一起改。
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
+          if (git status --porcelain -- THIRD_PARTY_LICENSES.md) {
+            throw "THIRD_PARTY_LICENSES.md 与当前依赖不一致，重新生成并提交后再发布"
+          }
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -51,7 +60,9 @@ jobs:
         shell: pwsh
         run: |
           $zip = "notecevia-$env:GITHUB_REF_NAME-windows.zip"
-          Compress-Archive -Path target/release/notecevia.exe -DestinationPath $zip -Force
+          # 分发二进制须附许可证副本与署名，见 LICENSE 第 4 条与 NOTICE。
+          $files = @("target/release/notecevia.exe", "LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md")
+          Compress-Archive -Path $files -DestinationPath $zip -Force
           $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
           "$hash  $zip" | Set-Content -Path "$zip.sha256" -Encoding ascii
       - name: 发布
