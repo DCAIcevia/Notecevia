@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! 领域模型与用例，不含 IO、时钟与界面类型。
 

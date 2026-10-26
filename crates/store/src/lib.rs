@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! 文件读写、索引与格式迁移。
 

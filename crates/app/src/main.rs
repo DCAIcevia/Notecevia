@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! 二进制入口：组装存储与界面。
 
