@@ -23,6 +23,15 @@ use crate::{chrome, strings, theme};
 /// 缩放范围。再小看不清，再大失去意义。
 const MIN_ZOOM: f32 = 0.15;
 const MAX_ZOOM: f32 = 6.0;
+
+/// 缩放与滑块位置的换算：取对数，小倍率那头给的空间大一点。
+fn zoom_to_ratio(zoom: f32) -> f32 {
+    (zoom / MIN_ZOOM).ln() / (MAX_ZOOM / MIN_ZOOM).ln()
+}
+
+fn zoom_from_ratio(ratio: f32) -> f32 {
+    MIN_ZOOM * (MAX_ZOOM / MIN_ZOOM).powf(ratio)
+}
 /// 新建文字块的高度；宽度按内容估算。
 const NEW_TEXT_HEIGHT: f32 = 60.0;
 /// 文字块自动变宽的换行上限：到了就换行，不再变宽。
@@ -637,6 +646,7 @@ impl BoardApp {
         self.paint_blocks(ui, &palette, clip);
         self.paint_marquee(ui, &palette, clip);
         self.paint_hud(ui, &palette, canvas);
+        self.zoom_control(ui, canvas);
         self.edit_text(ui, &palette);
         self.edit_table(ui, &palette);
         self.selection_toolbar(ui, &palette, canvas);
@@ -654,9 +664,14 @@ impl BoardApp {
             .map(|notice| (notice.text.as_str(), true))
     }
 
-    /// 当前缩放。工具栏要把这个数显示出来。
+    /// 当前缩放。工具栏与画布角上的读数都用它。
     pub fn view_zoom(&self) -> f32 {
         self.view.zoom
+    }
+
+    /// 由外面设缩放（画布角上的滑块用）。
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.view.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
     }
 
     /// 工具栏上直接点的插入动作。注意别和内部那个三参数的 insert_block 混。
@@ -737,6 +752,60 @@ impl BoardApp {
             let world = self.view.to_world(pointer);
             self.begin_new_text(world);
         }
+    }
+
+    /// 画布右下角：一个很淡的缩放读数加一条滑块。不抢内容的注意力。
+    ///
+    /// 滑块自己画：默认控件在这套配色下只剩一个孤零零的把手，看不出轨道。
+    fn zoom_control(&mut self, ui: &mut egui::Ui, canvas: Rect) {
+        let painter = ui.painter().clone();
+        let controls = Rect::from_min_size(
+            egui::pos2(canvas.max.x - 176.0, canvas.max.y - 36.0),
+            Vec2::new(164.0, theme::ui().control_height),
+        );
+        painter.text(
+            egui::pos2(controls.min.x, controls.center().y),
+            Align2::LEFT_CENTER,
+            strings::zoom_percent(self.view.zoom),
+            FontId::monospace(theme::ui().meta),
+            theme::chrome().text_faint,
+        );
+
+        let track = Rect::from_min_max(
+            egui::pos2(controls.min.x + 54.0, controls.center().y - 1.0),
+            egui::pos2(controls.max.x - 6.0, controls.center().y + 1.0),
+        );
+        let hit = track.expand2(Vec2::new(4.0, 10.0));
+        let response = ui.interact(
+            hit,
+            ui.scope_id().with("zoom-slider"),
+            Sense::click_and_drag(),
+        );
+        if (response.dragged() || response.clicked())
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let ratio = ((pointer.x - track.left()) / track.width()).clamp(0.0, 1.0);
+            let zoom = zoom_from_ratio(ratio);
+            self.set_zoom(zoom);
+        }
+
+        let ratio = zoom_to_ratio(self.view.zoom);
+        let knob = egui::pos2(track.left() + track.width() * ratio, track.center().y);
+        let active = response.hovered() || response.dragged();
+        let colour = if active {
+            theme::chrome().text_muted
+        } else {
+            theme::chrome().text_faint
+        };
+        painter.line_segment(
+            [track.left_center(), track.right_center()],
+            Stroke::new(2.0, theme::chrome().line),
+        );
+        painter.line_segment(
+            [track.left_center(), egui::pos2(knob.x, track.center().y)],
+            Stroke::new(2.0, colour),
+        );
+        painter.circle_filled(knob, 4.0, colour);
     }
 
     fn handle_keys(&mut self, ui: &egui::Ui) {
