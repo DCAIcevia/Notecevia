@@ -75,6 +75,8 @@ struct App {
     board: Option<BoardApp>,
     /// 外壳：顶栏、两条侧栏与资源栏的开合状态。
     shell: Shell,
+    /// 上一次设过的窗口标题，变了才发命令。
+    window_title: Option<String>,
     /// 当前画板的编号，文件名就是它。
     board_id: u64,
     /// 旧文件打不开时关掉写盘，免得用空画板盖掉用户原来那份。
@@ -127,6 +129,7 @@ impl App {
             home: HomeApp::new(),
             board: None,
             shell: Shell::new(),
+            window_title: None,
             board_id: 1,
             can_save: false,
             last_autosave: 0.0,
@@ -739,6 +742,15 @@ impl eframe::App for App {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
         self.home.set_now(now);
+        // 笔记名放窗口标题栏：工具栏里再顶一个名字，就成标签页了。
+        let title = match &self.board {
+            Some(board) => format!("{} — Notecevia", board.document().board.title),
+            None => "Notecevia".to_owned(),
+        };
+        if self.window_title.as_deref() != Some(title.as_str()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = Some(title);
+        }
         self.home
             .set_current(self.board.as_ref().map(|_| self.board_id));
         let mut fits_thumbnail = false;

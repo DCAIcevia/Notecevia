@@ -15,6 +15,8 @@ use crate::theme;
 
 /// 顶栏高。外壳里所有面板的头部都跟它等高，横线才对得齐。
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
+/// 全局工具栏高。横贯整窗，放在菜单栏下面。
+pub const TOOLBAR_HEIGHT: f32 = 44.0;
 /// 最左图标条宽。
 pub const RAIL_WIDTH: f32 = 52.0;
 /// 左侧边栏宽。
@@ -58,6 +60,15 @@ pub enum ViewMode {
     Shelf,
 }
 
+/// 全局工具栏上的动作。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolCommand {
+    /// 插入一块。
+    Insert(notecevia_core::BlockKind),
+    /// 把当前画布导成图片。
+    ExportImage,
+}
+
 /// 外壳画完之后交回给调用方的东西。
 #[derive(Default)]
 pub struct ShellOutput {
@@ -65,6 +76,8 @@ pub struct ShellOutput {
     pub home: Option<HomeAction>,
     /// 点了"新建笔记"。
     pub new_note: bool,
+    /// 全局工具栏上按出来的动作。
+    pub tool: Option<ToolCommand>,
     /// 菜单栏按出来的命令。
     pub menu: Option<MenuCommand>,
 }
@@ -97,7 +110,7 @@ impl Shell {
         &mut self,
         ui: &mut Ui,
         home: &mut HomeApp,
-        board: Option<&mut BoardApp>,
+        mut board: Option<&mut BoardApp>,
     ) -> ShellOutput {
         let mut output = ShellOutput::default();
         let full = ui.max_rect();
@@ -123,7 +136,20 @@ impl Shell {
             Stroke::new(1.0, theme::chrome().line),
         );
 
-        let body = Rect::from_min_max(egui::pos2(full.min.x, top.max.y), full.max);
+        // 全局工具栏：横贯整窗，不属于哪一篇笔记。
+        let toolbar = Rect::from_min_size(
+            egui::pos2(full.min.x, top.max.y),
+            Vec2::new(full.width(), TOOLBAR_HEIGHT),
+        );
+        let zoom = board.as_ref().map_or(1.0, |board| board.view_zoom());
+        let notice = board
+            .as_ref()
+            .and_then(|board| board.notice())
+            .map(|(text, error)| (text.to_owned(), error));
+        let board_for_toolbar = board.as_deref_mut();
+        self.toolbar(ui, toolbar, zoom, notice, board_for_toolbar);
+
+        let body = Rect::from_min_max(egui::pos2(full.min.x, toolbar.max.y), full.max);
 
         // 左侧栏：三层视图排一列。册与书架还没有数据，画淡、点了只说明。
         let rail = Rect::from_min_size(body.min, Vec2::new(RAIL_WIDTH, body.height()));
@@ -251,6 +277,115 @@ impl Shell {
             egui::pos2(rect.max.x - theme::ui().gap_m, rect.max.y - 4.0),
         );
         self.menu_bar(ui, menus, has_note, output);
+    }
+
+    /// 全局工具栏：一条横贯整窗的插入工具条，右侧是缩放与导出。
+    ///
+    /// 标题不放这儿：一条栏里顶着文档名，看着就像标签页；名字交给窗口标题。
+    fn toolbar(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        zoom: f32,
+        notice: Option<(String, bool)>,
+        mut board: Option<&mut BoardApp>,
+    ) {
+        let painter = ui.painter().clone();
+        painter.rect_filled(rect, CornerRadius::ZERO, theme::chrome().window);
+        painter.line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            Stroke::new(1.0, theme::chrome().line_soft),
+        );
+        let control = theme::ui().control_height;
+        let top = rect.center().y - control / 2.0;
+        let mut x = rect.min.x + theme::ui().gap_m;
+
+        for (icon, label, kind) in [
+            (Icon::Text, strings::NEW_TEXT, BlockKind::Text),
+            (Icon::Table, strings::NEW_TABLE, BlockKind::Table),
+            (Icon::Shape, strings::NEW_SHAPE, BlockKind::Shape),
+            (
+                Icon::Highlight,
+                strings::NEW_HIGHLIGHT,
+                BlockKind::Highlight,
+            ),
+        ] {
+            let button = Rect::from_min_size(egui::pos2(x, top), Vec2::splat(control));
+            if self.tool_button(ui, button, icon, label)
+                && let Some(board) = board.as_mut()
+            {
+                board.insert_kind(kind);
+            }
+            x += control + theme::ui().gap_s;
+        }
+
+        let mut right = rect.max.x - theme::ui().gap_m;
+        let export = Rect::from_min_size(egui::pos2(right - control, top), Vec2::splat(control));
+        if self.tool_button(ui, export, Icon::Export, strings::EXPORT_IMAGE)
+            && let Some(board) = board.as_mut()
+        {
+            board.request_image_export();
+        }
+        right = export.min.x - theme::ui().gap_l;
+
+        let zoom_text = strings::zoom_percent(zoom);
+        let galley = painter.layout_no_wrap(
+            zoom_text,
+            FontId::monospace(theme::ui().body),
+            theme::chrome().text_muted,
+        );
+        painter.galley(
+            egui::pos2(
+                right - galley.size().x,
+                rect.center().y - galley.size().y / 2.0,
+            ),
+            galley.clone(),
+            theme::chrome().text_muted,
+        );
+        right -= galley.size().x + theme::ui().gap_l;
+
+        if let Some((text, error)) = notice {
+            let colour = if error {
+                theme::chrome().danger
+            } else {
+                theme::chrome().text_faint
+            };
+            painter.text(
+                egui::pos2(right, rect.center().y),
+                Align2::RIGHT_CENTER,
+                text,
+                FontId::proportional(theme::ui().meta),
+                colour,
+            );
+        }
+    }
+
+    /// 工具栏上的图标按钮：悬停与按下只换底色。
+    fn tool_button(&self, ui: &mut Ui, rect: Rect, icon: Icon, label: &str) -> bool {
+        let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
+        let painter = ui.painter();
+        let active = response.has_focus() || response.is_pointer_button_down_on();
+        if active {
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(theme::ui().radius_control),
+                theme::chrome().pressed,
+            );
+        } else if response.hovered() {
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(theme::ui().radius_control),
+                theme::chrome().hover,
+            );
+        }
+        let colour = if response.hovered() || active {
+            theme::chrome().text
+        } else {
+            theme::chrome().text_muted
+        };
+        // 工具栏的图标画 20，比按钮本身小一圈就够，别再缩。
+        icons::draw(painter, rect.shrink(4.0), icon, colour);
+        response.on_hover_text(label).clicked()
     }
 
     /// 菜单栏：文件 / 编辑 / 选择 / 视图 / 帮助。一条老派的栏。

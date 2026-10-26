@@ -616,12 +616,8 @@ impl BoardApp {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.visuals().dark_mode);
-        let window = ui.max_rect();
-        let bar = Rect::from_min_size(
-            window.min,
-            Vec2::new(window.width(), chrome::CANVAS_BAR_HEIGHT),
-        );
-        let canvas = Rect::from_min_max(Pos2::new(window.min.x, bar.max.y), window.max);
+        // 主区整块都是画布：工具栏已经提到外壳里，全局一条。
+        let canvas = ui.max_rect();
         self.canvas = canvas;
         let clip = ui.clip_rect().intersect(canvas);
 
@@ -634,22 +630,6 @@ impl BoardApp {
         self.handle_background(ui, &background, canvas);
         ui.painter()
             .rect_filled(canvas, CornerRadius::ZERO, theme::chrome().window);
-
-        let (state, error) = self.status_text();
-        let bar_output = chrome::canvas_bar(
-            ui,
-            bar,
-            &self.document.board.title,
-            self.view.zoom,
-            &state,
-            error,
-        );
-        if bar_output.export_image {
-            self.image_export_request = true;
-        }
-        if let Some(kind) = bar_output.new_kind {
-            self.insert_new(kind);
-        }
 
         self.handle_keys(ui);
         self.ensure_fonts(ui.ctx());
@@ -664,17 +644,29 @@ impl BoardApp {
 
     // ---- 状态 ----
 
-    /// 画布栏上的状态。只有失败出字并且常驻；成功与「改过了」都不出字。
+    /// 工具栏上的提示：只有失败出字并且常驻。成功与「改过了」都不出字。
     ///
     /// 保存是同步写盘，同一帧就有结果，不存在能看见的「保存中」。
-    fn status_text(&self) -> (String, bool) {
-        let Some(notice) = &self.status else {
-            return (String::new(), false);
-        };
-        if notice.error {
-            return (notice.text.clone(), true);
-        }
-        (String::new(), false)
+    pub fn notice(&self) -> Option<(&str, bool)> {
+        self.status
+            .as_ref()
+            .filter(|notice| notice.error)
+            .map(|notice| (notice.text.as_str(), true))
+    }
+
+    /// 当前缩放。工具栏要把这个数显示出来。
+    pub fn view_zoom(&self) -> f32 {
+        self.view.zoom
+    }
+
+    /// 工具栏上直接点的插入动作。注意别和内部那个三参数的 insert_block 混。
+    pub fn insert_kind(&mut self, kind: BlockKind) {
+        self.insert_new(kind);
+    }
+
+    /// 工具栏上的导出图片。和画布里的导出走同一条请求。
+    pub fn request_image_export(&mut self) {
+        self.image_export_request = true;
     }
 
     // ---- 输入 ----
@@ -2720,7 +2712,7 @@ mod tests {
     }
 
     #[test]
-    fn only_failures_show_in_the_canvas_bar() {
+    fn only_failures_show_on_the_toolbar() {
         let mut app = blank();
         app.edit(|document| {
             document.add_text(Geometry::new(0.0, 0.0, 10.0, 10.0));
@@ -2728,17 +2720,16 @@ mod tests {
         assert!(app.is_dirty());
 
         // 改过了不出字，保存成功也不出字：保存状态不常驻。
-        assert_eq!(app.status_text(), (String::new(), false));
+        assert!(app.notice().is_none());
         app.set_status(strings::SAVED);
-        assert_eq!(app.status_text(), (String::new(), false));
+        assert!(app.notice().is_none());
 
         // 失败出字，而且不会自己消失。
-        app.set_error(strings::save_failed("磁盘满了"));
-        let (text, error) = app.status_text();
-        assert!(error);
-        assert_eq!(text, strings::save_failed("磁盘满了"));
+        let message = strings::save_failed("磁盘满了");
+        app.set_error(message.clone());
+        assert_eq!(app.notice(), Some((message.as_str(), true)));
         app.mark_saved();
-        assert_eq!(app.status_text(), (strings::save_failed("磁盘满了"), true));
+        assert_eq!(app.notice(), Some((message.as_str(), true)));
     }
 
     struct Sizes;
@@ -2808,16 +2799,17 @@ mod tests {
     }
 
     #[test]
-    fn canvas_rect_starts_below_the_canvas_bar() {
+    fn canvas_takes_the_whole_main_area() {
         let ctx = egui::Context::default();
         let mut app = blank();
         frame(&ctx, &mut app, 0.0, Vec::new());
 
+        // 工具栏已经提到外壳里，主区整块都是画布。
         let canvas = app.canvas_rect();
         assert!((canvas.left()).abs() < 0.001);
-        assert!((canvas.top() - chrome::CANVAS_BAR_HEIGHT).abs() < 0.001);
+        assert!((canvas.top()).abs() < 0.001);
         assert!((canvas.width() - 1280.0).abs() < 0.001);
-        assert!((canvas.height() - (760.0 - chrome::CANVAS_BAR_HEIGHT)).abs() < 0.001);
+        assert!((canvas.height() - 760.0).abs() < 0.001);
 
         assert!(!app.take_image_export_request());
         app.image_export_request = true;
