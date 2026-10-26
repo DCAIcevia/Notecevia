@@ -267,6 +267,19 @@ impl Workspace {
         Ok(hits.into_iter().map(|(_, _, hit)| hit).collect())
     }
 
+    /// 强制重读 boards/、丢掉内存索引并重建，用于外部改了工作区后刷新首页（Ctrl+R）。
+    ///
+    /// 返回重建后的画板条数（按 boards/ 里的画板文件数算，读不懂的也算一条占位）。
+    /// 只重写 index.cbor，不动画板、块与媒体文件；索引文件坏了也没关系，这里不读它。
+    pub fn rebuild_index(&self) -> Result<usize, Error> {
+        let index = self.build_index()?;
+        let count = index.boards.len();
+        // 先写盘再换内存：写不进去就报错，内存里仍是旧索引。
+        self.write_index(&index)?;
+        *self.index.borrow_mut() = Some(index);
+        Ok(count)
+    }
+
     /// 取索引；第一次用到时从磁盘读，缺失或过期就重建。
     pub(crate) fn ensure_index(&self) -> Result<Ref<'_, Index>, Error> {
         let loaded = self.index.borrow().is_some();

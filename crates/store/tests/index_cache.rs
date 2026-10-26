@@ -197,3 +197,64 @@ fn corrupt_board_file_does_not_break_the_index() {
     assert_eq!(reopened.list_boards().expect("列表").len(), 1);
     assert_eq!(reopened.search("正常正文").expect("搜索").len(), 1);
 }
+
+#[test]
+fn rebuild_index_sees_external_changes_without_reopening() {
+    let temp = TempWorkspace::new("index-force");
+    temp.workspace
+        .save_at(1, &text_document("甲", "第一张正文"), 100)
+        .expect("存盘");
+    assert_eq!(temp.workspace.list_boards().expect("列表").len(), 1);
+
+    // 外部新增一张：没刷新前仍是旧索引。
+    write_external(&temp, 2, "外部新增", 200);
+    assert_eq!(
+        temp.workspace.list_boards().expect("列表").len(),
+        1,
+        "没刷新前应该还是旧索引"
+    );
+    assert_eq!(temp.workspace.rebuild_index().expect("强制重建"), 2);
+    let boards = temp.workspace.list_boards().expect("列表");
+    assert_eq!(boards.len(), 2);
+    assert_eq!(boards[0].title, "外部新增");
+    let (id, _) = temp.workspace.load_latest().expect("最近").expect("有画板");
+    assert_eq!(id, 2);
+
+    // 外部改掉同一张：再重建能看到新标题与时间。
+    write_external(&temp, 2, "外部改过", 300);
+    assert_eq!(temp.workspace.rebuild_index().expect("强制重建"), 2);
+    let boards = temp.workspace.list_boards().expect("列表");
+    assert_eq!(boards[0].title, "外部改过");
+    assert_eq!(boards[0].updated_at, 300);
+
+    // 外部删掉一张：重建后不再返回它。
+    fs::remove_file(temp.path("boards/1.board")).expect("外部删画板");
+    assert_eq!(temp.workspace.rebuild_index().expect("强制重建"), 1);
+    let boards = temp.workspace.list_boards().expect("列表");
+    assert_eq!(boards.len(), 1);
+    assert_eq!(boards[0].title, "外部改过");
+    assert!(
+        temp.workspace
+            .search("第一张正文")
+            .expect("搜索")
+            .is_empty()
+    );
+}
+
+#[test]
+fn rebuild_index_does_not_fail_on_a_corrupt_index_file() {
+    let temp = TempWorkspace::new("index-force-corrupt");
+    temp.workspace
+        .save_at(1, &text_document("甲", "正文"), 100)
+        .expect("存盘");
+    fs::write(temp.path("index.cbor"), b"garbage").expect("写坏索引");
+
+    let count = temp.workspace.rebuild_index().expect("索引坏了也能重建");
+    assert_eq!(count, 1);
+    assert_eq!(temp.workspace.list_boards().expect("列表").len(), 1);
+    // 重建后索引文件重新可解码。
+    assert!(cbor::decode(&fs::read(temp.path("index.cbor")).expect("读索引")).is_ok());
+
+    // 重建不碰画板内容。
+    assert_eq!(temp.workspace.load(1).expect("读画板").text_of(1), "正文");
+}
