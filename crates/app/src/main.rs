@@ -882,6 +882,20 @@ impl eframe::App for App {
     }
 }
 
+/// 应用图标：近黑方块里一个白色小写 n。界面里不再重复摆这个标记。
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+
+/// 把图标 PNG 解成 egui 要的 RGBA。
+fn app_icon() -> Option<egui::IconData> {
+    let image = image::load_from_memory(ICON_PNG).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    Some(egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
 /// 一张没起名、也没放过任何块的笔记。
 fn is_blank_note(board: &BoardApp) -> bool {
     let document = board.document();
@@ -938,11 +952,15 @@ fn main() -> eframe::Result {
         }
     }
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(notecevia_ui::window_title())
+        .with_inner_size([1280.0, 760.0])
+        .with_min_inner_size([720.0, 420.0]);
+    if let Some(icon) = app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(notecevia_ui::window_title())
-            .with_inner_size([1280.0, 760.0])
-            .with_min_inner_size([720.0, 420.0]),
+        viewport,
         ..Default::default()
     };
     let started = Instant::now();
