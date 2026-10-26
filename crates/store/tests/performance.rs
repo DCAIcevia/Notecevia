@@ -5,6 +5,7 @@
 //! 生成的都是最小合法文件（画板 + 一个文本块），数据写在系统临时目录，跑完删掉。
 //! 分两段看：没有索引的老工作区要先重建一次（一次性）；模拟真实启动时索引已存在，
 //! 只校验与读索引，这才是日常路径。
+//! 最后一段专门量增量保存：一千块的画板，全量 save_at 与只改一块的 save_changed。
 
 mod support;
 
@@ -12,6 +13,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
+use notecevia_core::board::{BlockKind, Body, Document, Geometry};
 use notecevia_store::{Workspace, cbor};
 
 use support::TempWorkspace;
@@ -176,4 +178,41 @@ fn ten_thousand_boards_are_measured() {
     report("list_boards（一万张，读索引）", list_time, 1_500);
     report("search（一万张，命中一万条，读索引）", search_time, 100);
     println!("save_at（含索引重写，单次）：{save_time:?}");
+
+    // 四、一千块画板的增量保存：全量写一千个块 vs 只重写改动的块。
+    let incremental = TempWorkspace::new("performance-save-changed");
+    let mut document = Document::new("一千块画板");
+    for index in 0..1_000u64 {
+        let id = document.add_block(
+            BlockKind::Text,
+            Geometry::new(0.0, index as f32 * 30.0, 240.0, 24.0),
+        );
+        if let Some(Body::Text(block)) = document.body_mut(id) {
+            block.text = format!("第 {id} 块");
+        }
+    }
+    incremental
+        .workspace
+        .save_at(1, &document, BASE_TIME)
+        .expect("初次全量保存");
+
+    let full_started = Instant::now();
+    incremental
+        .workspace
+        .save_at(1, &document, BASE_TIME + 1)
+        .expect("全量保存");
+    let full_time = full_started.elapsed();
+
+    if let Some(Body::Text(block)) = document.body_mut(1) {
+        block.text = "只改一块".to_owned();
+    }
+    let changed_started = Instant::now();
+    incremental
+        .workspace
+        .save_changed(1, &document, &[1])
+        .expect("增量保存");
+    let changed_time = changed_started.elapsed();
+
+    println!("1000 块画板全量 save_at：{full_time:?}");
+    println!("1000 块画板 save_changed（只改 1 块）：{changed_time:?}");
 }

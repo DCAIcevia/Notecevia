@@ -113,6 +113,32 @@ impl Workspace {
         document: &Document,
         updated_at: i64,
     ) -> Result<(), Error> {
+        self.save_document(board_id, document, updated_at, None)
+    }
+
+    /// 增量存盘：只重写 changed 里的块正文，其余块文件一个字节都不动。
+    ///
+    /// 流程与 [save_at] 一样：写块 → 写画板 → 回收孤儿块 → 更新索引；时间戳取当前时间。
+    /// changed 里有、文档里没有的编号直接跳过——删掉的块靠孤儿回收处理。
+    /// 画板文件仍然整份重写（目录项可能变了），省下的是块文件与它们的 fsync。
+    pub fn save_changed(
+        &self,
+        board_id: u64,
+        document: &Document,
+        changed: &[u64],
+    ) -> Result<(), Error> {
+        let changed: BTreeSet<u64> = changed.iter().copied().collect();
+        self.save_document(board_id, document, now_seconds(), Some(&changed))
+    }
+
+    /// 全量与增量共用的存盘流程。changed 为 None 表示写全部块。
+    fn save_document(
+        &self,
+        board_id: u64,
+        document: &Document,
+        updated_at: i64,
+        changed: Option<&BTreeSet<u64>>,
+    ) -> Result<(), Error> {
         // 旧文件里认不出的字段要留到写回：先从盘上收一遍，再覆盖写。
         let (board_extras, entry_extras) = match self.read_board_lenient(board_id) {
             Ok(Some(on_disk)) => (on_disk.extras, on_disk.entry_extras),
@@ -122,6 +148,11 @@ impl Workspace {
             Err(_) => (Vec::new(), BTreeMap::new()),
         };
         for entry in &document.board.entries {
+            if let Some(changed) = changed
+                && !changed.contains(&entry.id)
+            {
+                continue;
+            }
             let Some(body) = document.body(entry.id) else {
                 continue;
             };
