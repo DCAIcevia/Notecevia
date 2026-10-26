@@ -25,7 +25,12 @@ const CHIP_PAD: f32 = 7.0;
 const SEARCH_WIDTH: f32 = 240.0;
 const PAGE_MARGIN_X: i8 = 24;
 const PAGE_MARGIN_Y: i8 = 16;
-const ROW_GAP: f32 = 2.0;
+/// 虚拟滚动要固定行高；普通行放标题 + meta + 缩略图。
+const ROW_HEIGHT: f32 = 66.0;
+/// 搜索命中时每行多一行 snippet，整表换高一档。
+const SEARCH_ROW_HEIGHT: f32 = 80.0;
+/// 删除确认时右侧动作区要放得下「取消」「确认删除」两个按钮。
+const CONFIRM_ACTION_WIDTH: f32 = 150.0;
 const JUST_NOW_SECS: i64 = 60;
 const DAY_SECS: i64 = 86_400;
 const THUMB_WIDTH: f32 = 56.0;
@@ -117,6 +122,12 @@ struct HomeState {
     typing: bool,
     /// 键盘换了选中行，下一帧把它滚进视野。
     scroll_to: Option<u64>,
+    /// 上一帧列表可视区 (滚动偏移, 高度)，键盘把选中行移出视野时用来算目标偏移。
+    scroll_viewport: (f32, f32),
+    /// 下一帧强制滚动到的偏移（像素）。
+    scroll_override: Option<f32>,
+    /// 上一帧实际布局了多少行；测试用它确认虚拟滚动没有偷偷排全表。
+    rendered_rows: usize,
 }
 
 impl HomeApp {
@@ -206,27 +217,49 @@ impl HomeApp {
                     state.selected = None;
                 }
 
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if visible.is_empty() {
-                            if let Some(chosen) = placeholder(state, ui, &palette)
-                                && action.is_none()
-                            {
-                                action = Some(chosen);
-                            }
-                            return;
-                        }
-                        for board in &visible {
-                            if let Some(chosen) =
-                                board_row(state, ui, &palette, board, now, &mut thumbs)
-                                && action.is_none()
-                            {
-                                action = Some(chosen);
-                            }
-                            ui.add_space(ROW_GAP);
-                        }
+                if visible.is_empty() {
+                    if let Some(chosen) = placeholder(state, ui, &palette)
+                        && action.is_none()
+                    {
+                        action = Some(chosen);
+                    }
+                } else {
+                    // 行高固定才能虚拟滚动：只有可见行会被布局。
+                    let has_snippet = visible.iter().any(|board| {
+                        board
+                            .snippet
+                            .as_deref()
+                            .is_some_and(|snippet| !snippet.is_empty())
                     });
+                    let row_height = if has_snippet {
+                        SEARCH_ROW_HEIGHT
+                    } else {
+                        ROW_HEIGHT
+                    };
+                    let stride = row_height + ui.spacing().item_spacing.y;
+                    sync_scroll(state, &visible, row_height, stride);
+
+                    let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    if let Some(offset) = state.scroll_override.take() {
+                        area = area.vertical_scroll_offset(offset);
+                    }
+                    let output = area.show_rows(ui, row_height, visible.len(), |ui, rows| {
+                        let rendered = rows.len();
+                        for index in rows {
+                            let board = visible[index];
+                            if let Some(chosen) =
+                                board_row(state, ui, &palette, board, now, &mut thumbs, row_height)
+                                && action.is_none()
+                            {
+                                action = Some(chosen);
+                            }
+                        }
+                        rendered
+                    });
+                    state.rendered_rows = output.inner;
+                    state.scroll_viewport =
+                        (output.state.clamped_offset().y, output.inner_rect.height());
+                }
 
                 handle_keys(state, &visible, ui, &mut action);
             });
@@ -430,6 +463,7 @@ fn board_row(
     board: &BoardItem,
     now: i64,
     thumbs: &mut ThumbnailCache<'_>,
+    row_height: f32,
 ) -> Option<HomeAction> {
     let selected = state.selected == Some(board.id);
     let confirming = state.pending_delete == Some(board.id);
@@ -448,10 +482,17 @@ fn board_row(
                 .inner_margin(Margin::symmetric(ROW_PAD_X, ROW_PAD_Y))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
+                    // 固定行高下把内容撑满这一行，悬停/点击区域才覆盖整行。
+                    ui.set_min_height(row_height - f32::from(ROW_PAD_Y) * 2.0);
                     ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                         thumbnail_cell(ui, palette, thumbs, board);
                         ui.add_space(THUMB_GAP);
-                        let content_width = (ui.available_width() - ACTION_WIDTH - 8.0).max(120.0);
+                        let action_width = if confirming {
+                            CONFIRM_ACTION_WIDTH
+                        } else {
+                            ACTION_WIDTH
+                        };
+                        let content_width = (ui.available_width() - action_width - 8.0).max(120.0);
                         ui.allocate_ui_with_layout(
                             vec2(content_width, 0.0),
                             Layout::top_down(Align::Min),
@@ -468,10 +509,23 @@ fn board_row(
                             },
                         );
                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                            let more = ui.add(Button::new("⋯").frame(false));
-                            egui::Popup::from_toggle_button_response(&more)
-                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .show(|ui| board_menu(state, ui, board, &mut action));
+                            if confirming {
+                                if ui.button(strings::HOME_CONFIRM).clicked() {
+                                    state.pending_delete = None;
+                                    state.editing = None;
+                                    if action.is_none() {
+                                        action = Some(HomeAction::Delete(board.id));
+                                    }
+                                }
+                                if ui.button(strings::HOME_CANCEL).clicked() {
+                                    state.pending_delete = None;
+                                }
+                            } else {
+                                let more = ui.add(Button::new("⋯").frame(false));
+                                egui::Popup::from_toggle_button_response(&more)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .show(|ui| board_menu(state, ui, board, &mut action));
+                            }
                         });
                     });
                 });
@@ -504,11 +558,6 @@ fn board_row(
         action = Some(HomeAction::Open(board.id));
     }
     response.context_menu(|ui| board_menu(state, ui, board, &mut action));
-
-    if selected && state.scroll_to == Some(board.id) {
-        response.scroll_to_me(Some(Align::Center));
-        state.scroll_to = None;
-    }
 
     action
 }
@@ -636,10 +685,12 @@ fn row_content(
         );
     }
 
-    if let Some(snippet) = board
-        .snippet
-        .as_deref()
-        .filter(|snippet| !snippet.is_empty())
+    // 重命名时让出 snippet 那一行，保证固定行高里放得下。
+    if !renaming
+        && let Some(snippet) = board
+            .snippet
+            .as_deref()
+            .filter(|snippet| !snippet.is_empty())
     {
         ui.add(
             Label::new(snippet_job(snippet, state.search.trim(), palette))
@@ -648,21 +699,27 @@ fn row_content(
     }
 
     ui.add_space(2.0);
-    ui.horizontal(|ui| {
-        ui.label(meta_text(board, now, palette));
-        for tag in &board.tags {
-            let _ = tag_chip(ui, palette, tag, false);
-        }
-    });
-
-    if state.pending_delete == Some(board.id) {
-        ui.add_space(6.0);
-        confirm_delete(state, ui, palette, board, action);
-    }
-
-    if state.selected == Some(board.id) && !renaming {
-        ui.add_space(6.0);
+    let confirming = state.pending_delete == Some(board.id);
+    let editing_tags = state.selected == Some(board.id) && !renaming && !confirming;
+    if confirming {
+        // 确认条压在同一行高里：说明文字占 meta 位，按钮放到右侧动作区。
+        ui.add(
+            Label::new(
+                RichText::new(strings::HOME_CONFIRM_DELETE)
+                    .size(theme::SMALL_FONT)
+                    .color(palette.muted),
+            )
+            .truncate(),
+        );
+    } else if editing_tags {
         tag_editor(state, ui, palette, board, action, typing);
+    } else {
+        ui.horizontal(|ui| {
+            ui.label(meta_text(board, now, palette));
+            for tag in &board.tags {
+                let _ = tag_chip(ui, palette, tag, false);
+            }
+        });
     }
 }
 
@@ -709,6 +766,7 @@ fn rename_field(
             TextEdit::singleline(text)
                 .id(id)
                 .desired_width(ui.available_width())
+                .margin(Margin::symmetric(2, 1))
                 .font(FontId::proportional(theme::BLOCK_FONT)),
         );
         if state.rename_focus {
@@ -737,33 +795,6 @@ fn rename_field(
     }
 }
 
-fn confirm_delete(
-    state: &mut HomeState,
-    ui: &mut Ui,
-    palette: &theme::Palette,
-    board: &BoardItem,
-    action: &mut Option<HomeAction>,
-) {
-    ui.label(
-        RichText::new(strings::HOME_CONFIRM_DELETE)
-            .size(theme::SMALL_FONT)
-            .color(palette.muted),
-    );
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        if ui.button(strings::HOME_CANCEL).clicked() {
-            state.pending_delete = None;
-        }
-        if ui.button(strings::HOME_CONFIRM).clicked() {
-            state.pending_delete = None;
-            state.editing = None;
-            if action.is_none() {
-                *action = Some(HomeAction::Delete(board.id));
-            }
-        }
-    });
-}
-
 /// 选中画板的标签：点标签删掉，输入框回车加一个。
 fn tag_editor(
     state: &mut HomeState,
@@ -786,6 +817,7 @@ fn tag_editor(
             TextEdit::singleline(&mut state.tag_draft)
                 .id(ui.make_persistent_id(("tag-input", board.id)))
                 .hint_text(strings::HOME_ADD_TAG)
+                .margin(Margin::symmetric(2, 1))
                 .desired_width(120.0),
         );
         if state.tag_focus {
@@ -983,6 +1015,30 @@ where
         normalized.push(tag.to_owned());
     }
     normalized
+}
+
+/// 键盘选中行不在可视区时，下一帧直接给滚动区一个目标偏移。
+///
+/// show_rows 只绘制可见行，看不见的行没法用 scroll_to_me，只能按行高算偏移。
+fn sync_scroll(state: &mut HomeState, visible: &[&BoardItem], row_height: f32, stride: f32) {
+    let Some(target) = state.scroll_to.take() else {
+        return;
+    };
+    let Some(index) = visible.iter().position(|board| board.id == target) else {
+        return;
+    };
+    let (offset, height) = state.scroll_viewport;
+    if height <= 0.0 {
+        // 还没量到可视高度（第一帧）：可见行本来就在屏幕里。
+        return;
+    }
+    let top = index as f32 * stride;
+    let bottom = top + row_height;
+    if top < offset {
+        state.scroll_override = Some(top);
+    } else if bottom > offset + height {
+        state.scroll_override = Some((bottom - height).max(0.0));
+    }
 }
 
 fn handle_keys(
@@ -1204,5 +1260,71 @@ mod tests {
         frame(&mut app);
         // 第二帧命中 (id, updated_at) 缓存，不再向来源取字节。
         assert_eq!(calls.get(), 2);
+    }
+
+    fn screen() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1280.0, 760.0),
+            )),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_thousand_rows_only_fetch_thumbnails_for_visible_rows() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut app = HomeApp::with_thumbnails(Box::new(CountingSource {
+            calls: calls.clone(),
+        }));
+        app.set_boards((0..1000).map(|id| board(id, &[])).collect());
+
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(screen(), |ui| {
+            let _ = app.ui(ui);
+        });
+        output.textures_delta.clear();
+
+        let fetched = calls.get();
+        assert!(fetched > 0, "可见行应该取缩略图");
+        assert!(
+            fetched < 40,
+            "1000 行里只该给可见行取图，实际取了 {fetched} 张"
+        );
+        // 虚拟滚动的直接证据：一帧只布局了可见的那几行。
+        assert!(
+            app.state.rendered_rows > 0 && app.state.rendered_rows < 40,
+            "1000 行里只该布局可见行，实际布局了 {} 行",
+            app.state.rendered_rows
+        );
+    }
+
+    #[test]
+    fn keyboard_selection_scrolls_the_virtual_list() {
+        let mut app = HomeApp::new();
+        app.set_boards((0..200).map(|id| board(id, &[])).collect());
+
+        let ctx = egui::Context::default();
+        for _ in 0..60 {
+            let mut input = screen();
+            input.events.push(egui::Event::Key {
+                key: Key::ArrowDown,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            });
+            let mut output = ctx.run_ui(input, |ui| {
+                let _ = app.ui(ui);
+            });
+            output.textures_delta.clear();
+        }
+
+        assert_eq!(app.state.selected, Some(59));
+        assert!(
+            app.state.scroll_viewport.0 > 0.0,
+            "选中行移出视野后列表应该跟着滚动"
+        );
     }
 }
