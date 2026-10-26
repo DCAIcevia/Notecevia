@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use notecevia_core::board::{Body, Document};
+use notecevia_core::board::{Board, Body, Document};
 
 use crate::cbor::{self, Value};
 use crate::error::Error;
@@ -21,8 +21,10 @@ use crate::workspace::{Workspace, write_atomic};
 
 /// 索引文件名，放在工作区根目录。删掉它没有副作用，下次用到会重建。
 pub(crate) const INDEX_FILE: &str = "index.cbor";
-/// 索引自己的格式号。字段变了就加一，读到不认识的号当没有索引。
-const INDEX_FORMAT: i64 = 1;
+/// 索引自己的格式号。字段或内容语义变了就加一，读到不认识的号当没有索引。
+///
+/// 2：可搜索片段加入表格单元格文字与媒体块文件名，旧索引必须重建。
+const INDEX_FORMAT: i64 = 2;
 
 /// 列表页的一行。正文不在这里，点开才读。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,7 +64,7 @@ pub(crate) struct IndexedBoard {
     pub updated_at: i64,
     pub entry_count: usize,
     pub has_thumbnail: bool,
-    /// 文本块正文，按目录顺序；搜索拼 snippet 用。
+    /// 可搜索片段，按目录顺序：文本块正文、表格单元格、媒体块文件名。
     pub texts: Vec<String>,
     /// 画板文件读不懂时留个占位：集合对得上，列表与搜索跳过它。
     pub readable: bool,
@@ -316,7 +318,7 @@ impl Workspace {
             updated_at,
             entry_count: document.board.entries.len(),
             has_thumbnail: self.thumbnail_path(board_id).is_file(),
-            texts: text_blocks(document),
+            texts: searchable_texts(&document.board, &document.bodies),
             readable: true,
             stamp: stamp_of_path(&self.board_path(board_id)),
         };
@@ -455,35 +457,44 @@ fn indexed_board(
     has_thumbnail: bool,
     stamp: Option<FileStamp>,
 ) -> IndexedBoard {
-    let mut texts = Vec::new();
-    for entry in &on_disk.board.entries {
-        if let Some(Body::Text(text)) = bodies.get(&entry.id) {
-            texts.push(text.text.clone());
-        }
-    }
     IndexedBoard {
         title: on_disk.board.title.clone(),
         tags: on_disk.board.tags.clone(),
         updated_at: on_disk.updated_at,
         entry_count: on_disk.board.entries.len(),
         has_thumbnail,
-        texts,
+        texts: searchable_texts(&on_disk.board, bodies),
         readable: true,
         stamp,
     }
 }
 
-/// 内存里的文档有哪些文本块正文，按目录顺序。
-fn text_blocks(document: &Document) -> Vec<String> {
-    document
-        .board
-        .entries
-        .iter()
-        .filter_map(|entry| match document.body(entry.id) {
-            Some(Body::Text(text)) => Some(text.text.clone()),
-            _ => None,
-        })
-        .collect()
+/// 一张画板里能搜的文字，按目录顺序：文本块正文、表格单元格、媒体块文件名。
+///
+/// 表格按行优先把非空单元格用空格连成一段；媒体块（图片、视频、音频）收 name。
+fn searchable_texts(board: &Board, bodies: &BTreeMap<u64, Body>) -> Vec<String> {
+    let mut texts = Vec::new();
+    for entry in &board.entries {
+        match bodies.get(&entry.id) {
+            Some(Body::Text(block)) if !block.text.is_empty() => texts.push(block.text.clone()),
+            Some(Body::Table(block)) => {
+                let joined = block
+                    .cells
+                    .iter()
+                    .filter(|cell| !cell.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !joined.is_empty() {
+                    texts.push(joined);
+                }
+            }
+            Some(Body::Image(block)) if !block.name.is_empty() => texts.push(block.name.clone()),
+            Some(Body::Media(block)) if !block.name.is_empty() => texts.push(block.name.clone()),
+            _ => {}
+        }
+    }
+    texts
 }
 
 fn stamp_of(metadata: &fs::Metadata) -> Option<FileStamp> {

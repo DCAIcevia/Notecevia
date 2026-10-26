@@ -6,7 +6,7 @@ mod support;
 
 use std::fs;
 
-use notecevia_core::board::{BlockKind, Body, Document, Geometry};
+use notecevia_core::board::{BlockKind, Body, Document, Geometry, TableBlock};
 use notecevia_store::{Workspace, cbor};
 
 use support::TempWorkspace;
@@ -257,4 +257,136 @@ fn rebuild_index_does_not_fail_on_a_corrupt_index_file() {
 
     // 重建不碰画板内容。
     assert_eq!(temp.workspace.load(1).expect("读画板").text_of(1), "正文");
+}
+
+/// 一张含表格与媒体的画板：表格里有独特词，图片与视频的文件名也是独特词。
+fn rich_document(image_media: &str, video_media: &str) -> Document {
+    let mut document = text_document("表格与媒体", "普通正文");
+    let table = document.add_block(BlockKind::Table, Geometry::new(0.0, 100.0, 240.0, 120.0));
+    if let Some(Body::Table(block)) = document.body_mut(table) {
+        *block = TableBlock::new(2, 2);
+        block.set_cell(0, 0, "季度目标");
+        block.set_cell(1, 1, "完成一半");
+    }
+    let image = document.add_block(BlockKind::Image, Geometry::new(0.0, 240.0, 120.0, 120.0));
+    if let Some(Body::Image(block)) = document.body_mut(image) {
+        block.media = image_media.to_owned();
+        block.name = "季度照片.png".to_owned();
+    }
+    let video = document.add_block(BlockKind::Video, Geometry::new(140.0, 240.0, 120.0, 120.0));
+    if let Some(Body::Media(block)) = document.body_mut(video) {
+        block.media = video_media.to_owned();
+        block.name = "会议录像.mp4".to_owned();
+        block.bytes = 4;
+    }
+    document
+}
+
+/// 把索引改成旧格式（格式号 1、texts 清空），文件指纹保持有效：
+/// 这样只有格式号不对能触发重建，能证明不是靠指纹碰巧重建的。
+fn downgrade_index(temp: &TempWorkspace) {
+    let index =
+        cbor::decode(&fs::read(temp.path("index.cbor")).expect("读索引")).expect("解码索引");
+    let cbor::Value::Map(mut pairs) = index else {
+        panic!("索引应该是映射");
+    };
+    for (key, value) in &mut pairs {
+        match key {
+            cbor::Value::Text(name) if name == "format" => *value = cbor::Value::Integer(1),
+            cbor::Value::Text(name) if name == "boards" => {
+                let cbor::Value::Array(boards) = value else {
+                    continue;
+                };
+                for board in boards {
+                    let cbor::Value::Map(board_pairs) = board else {
+                        continue;
+                    };
+                    for (board_key, board_value) in board_pairs {
+                        if matches!(board_key, cbor::Value::Text(name) if name == "texts") {
+                            *board_value = cbor::Value::Array(Vec::new());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    fs::write(
+        temp.path("index.cbor"),
+        cbor::encode(&cbor::Value::Map(pairs)),
+    )
+    .expect("写旧索引");
+}
+
+#[test]
+fn search_matches_table_cells_and_media_names() {
+    let temp = TempWorkspace::new("index-search-rich");
+    let image = temp
+        .workspace
+        .put_media("季度照片.png", b"png bytes")
+        .expect("放图片");
+    let video = temp
+        .workspace
+        .put_media("会议录像.mp4", b"video bytes")
+        .expect("放视频");
+    temp.workspace
+        .save_at(1, &rich_document(&image, &video), 100)
+        .expect("存盘");
+
+    // 同一个工作区实例：save_at 的增量索引也要带上表格与文件名。
+    for query in ["季度目标", "完成一半", "季度照片.png", "会议录像.mp4"] {
+        let hits = temp.workspace.search(query).expect("搜索");
+        assert_eq!(hits.len(), 1, "{query} 应该命中这张画板");
+        assert!(
+            hits[0].snippet.contains(query),
+            "{query} 的 snippet 应包含命中的词：{:?}",
+            hits[0].snippet
+        );
+    }
+    // 普通正文仍然搜得到，标题与标签的优先级没有被改。
+    assert_eq!(temp.workspace.search("普通正文").expect("搜索").len(), 1);
+    assert!(
+        temp.workspace
+            .search("不存在的词")
+            .expect("搜索")
+            .is_empty()
+    );
+
+    // 重新打开走重建路径，结果一致。
+    let reopened = Workspace::open(&temp.root).expect("重开工作区");
+    for query in ["季度目标", "季度照片.png", "会议录像.mp4"] {
+        let hits = reopened.search(query).expect("搜索");
+        assert_eq!(hits.len(), 1, "{query} 重建索引后仍应命中");
+    }
+}
+
+#[test]
+fn old_index_format_is_rebuilt_automatically() {
+    let temp = TempWorkspace::new("index-old-format");
+    let image = temp
+        .workspace
+        .put_media("季度照片.png", b"png bytes")
+        .expect("放图片");
+    let video = temp
+        .workspace
+        .put_media("会议录像.mp4", b"video bytes")
+        .expect("放视频");
+    temp.workspace
+        .save_at(1, &rich_document(&image, &video), 100)
+        .expect("存盘");
+    assert_eq!(temp.workspace.list_boards().expect("列表").len(), 1);
+
+    downgrade_index(&temp);
+    let reopened = Workspace::open(&temp.root).expect("重开工作区");
+    let hits = reopened.search("季度目标").expect("搜索表格单元格");
+    assert_eq!(hits.len(), 1, "低格式号的旧索引应该被丢弃并重建");
+    assert!(hits[0].snippet.contains("季度目标"));
+
+    let index =
+        cbor::decode(&fs::read(temp.path("index.cbor")).expect("读索引")).expect("解码索引");
+    assert_eq!(
+        index.get("format").and_then(cbor::Value::as_integer),
+        Some(2),
+        "重建后应该写回当前索引格式号"
+    );
 }
