@@ -537,8 +537,15 @@ impl App {
         let now = Instant::now();
         let started = *self.stats_started.get_or_insert(now);
         if let Some(last) = self.last_frame_at {
-            self.frame_samples
-                .push(now.duration_since(last).as_secs_f64());
+            let delta = now.duration_since(last).as_secs_f64();
+            if delta >= 0.1 {
+                eprintln!(
+                    "慢帧 #{}：{:.1} ms",
+                    self.frame_samples.len() + 1,
+                    delta * 1000.0
+                );
+            }
+            self.frame_samples.push(delta);
         }
         self.last_frame_at = Some(now);
         if now.duration_since(started).as_secs_f64() < seconds {
