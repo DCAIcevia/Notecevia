@@ -224,27 +224,19 @@ impl Workspace {
     }
 
     /// 清掉工作区里上次崩溃留下的 *.tmp，返回清掉的条数。启动时调一次。
+    ///
+    /// 只扫根目录与 boards/、blocks/、media/、thumbnails/ 这一层：原子写用的临时文件
+    /// 都落在目标文件旁边，别的目录（.trash、exports）里的东西不归这里管。
     pub fn recover(&self) -> Result<usize, Error> {
         let mut removed = 0;
-        let mut stack = vec![self.root.clone()];
-        while let Some(dir) = stack.pop() {
-            // 目录可能在扫描途中被别的进程删掉；跳过，不为此中断启动。
-            let Ok(entries) = fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else {
-                    continue;
-                };
-                let path = entry.path();
-                if file_type.is_dir() {
-                    stack.push(path);
-                } else if path.extension().and_then(|ext| ext.to_str()) == Some("tmp")
-                    && fs::remove_file(&path).is_ok()
-                {
-                    removed += 1;
-                }
-            }
+        for dir in [
+            self.root.clone(),
+            self.root.join(BOARDS_DIR),
+            self.root.join(BLOCKS_DIR),
+            self.root.join(MEDIA_DIR),
+            self.root.join(THUMBNAILS_DIR),
+        ] {
+            removed += remove_temp_files(&dir);
         }
         Ok(removed)
     }
@@ -433,6 +425,24 @@ impl Workspace {
         ids.dedup();
         Ok(ids)
     }
+}
+
+/// 删掉某个目录下一层的 *.tmp，返回删掉的条数。不递归，也不跟随子目录。
+fn remove_temp_files(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+        })
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("tmp"))
+        .filter(|entry| fs::remove_file(entry.path()).is_ok())
+        .count()
 }
 
 /// 先写临时文件、落盘后再改名。改名是同目录的原子操作，

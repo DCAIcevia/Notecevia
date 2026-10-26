@@ -94,22 +94,14 @@ fn corrupt_index_is_rebuilt_without_touching_boards() {
 }
 
 #[test]
-fn external_board_changes_are_detected_on_reopen() {
+fn external_add_delete_and_rename_are_detected_on_reopen() {
     let temp = TempWorkspace::new("index-external");
     temp.workspace
         .save_at(1, &text_document("甲", "旧正文"), 100)
         .expect("存盘");
     assert_eq!(temp.workspace.list_boards().expect("列表").len(), 1);
 
-    // 外部改了一张已有画板：标题与 updated_at 都变，文件长度也变。
-    write_external(&temp, 1, "外部改过的", 999);
-    let reopened = Workspace::open(&temp.root).expect("重开工作区");
-    let boards = reopened.list_boards().expect("列表");
-    assert_eq!(boards.len(), 1);
-    assert_eq!(boards[0].title, "外部改过的");
-    assert_eq!(boards[0].updated_at, 999);
-
-    // 外部新增一张。
+    // 外部新增一张：文件数与目录时间都变，打开时能发现并重建。
     write_external(&temp, 2, "外部新增", 1_000);
     let reopened = Workspace::open(&temp.root).expect("重开工作区");
     let boards = reopened.list_boards().expect("列表");
@@ -126,6 +118,41 @@ fn external_board_changes_are_detected_on_reopen() {
         reopened.load(2).expect("读画板").board.entries.is_empty(),
         "内容仍然可读"
     );
+
+    // 外部改名：原子改名会改目录时间，打开时同样能发现。
+    fs::rename(temp.path("boards/2.board"), temp.path("boards/3.board")).expect("外部改名");
+    let reopened = Workspace::open(&temp.root).expect("重开工作区");
+    let boards = reopened.list_boards().expect("列表");
+    assert_eq!(boards.len(), 1);
+    assert_eq!(boards[0].id, 3);
+    assert_eq!(boards[0].title, "外部新增");
+}
+
+#[test]
+fn in_place_overwrite_needs_rebuild_to_be_seen() {
+    let temp = TempWorkspace::new("index-in-place");
+    temp.workspace
+        .save_at(1, &text_document("甲", "旧正文"), 100)
+        .expect("存盘");
+    assert_eq!(temp.workspace.list_boards().expect("列表")[0].title, "甲");
+
+    // 原地覆盖写：文件数不变、目录时间不变，打开时发现不了（有意的取舍）。
+    write_external(&temp, 1, "原地改的", 999);
+    let reopened = Workspace::open(&temp.root).expect("重开工作区");
+    let boards = reopened.list_boards().expect("列表");
+    assert_eq!(boards.len(), 1);
+    assert_eq!(
+        boards[0].title, "甲",
+        "原地覆盖写不改变目录指纹，索引不会自动重建"
+    );
+    assert_eq!(boards[0].updated_at, 100);
+
+    // rebuild_index 能立刻刷新。
+    assert_eq!(reopened.rebuild_index().expect("强制重建"), 1);
+    let boards = reopened.list_boards().expect("列表");
+    assert_eq!(boards[0].title, "原地改的");
+    assert_eq!(boards[0].updated_at, 999);
+    assert_eq!(reopened.load(1).expect("读画板").board.title, "原地改的");
 }
 
 #[test]
@@ -386,7 +413,7 @@ fn old_index_format_is_rebuilt_automatically() {
         cbor::decode(&fs::read(temp.path("index.cbor")).expect("读索引")).expect("解码索引");
     assert_eq!(
         index.get("format").and_then(cbor::Value::as_integer),
-        Some(2),
+        Some(3),
         "重建后应该写回当前索引格式号"
     );
 }

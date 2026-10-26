@@ -718,3 +718,34 @@ fn thumbnails_are_optional_and_follow_the_board_into_trash() {
             .is_none()
     );
 }
+
+#[test]
+fn recover_only_cleans_the_root_and_the_four_data_directories() {
+    let temp = TempWorkspace::new("recover-scope");
+    // 原子写的临时文件只会落在根与这四个目录旁边。
+    fs::write(temp.path("root.tmp"), b"x").expect("放临时文件");
+    fs::write(temp.path("boards/1.tmp"), b"x").expect("放临时文件");
+    fs::write(temp.path("blocks/1-1.tmp"), b"x").expect("放临时文件");
+    fs::write(temp.path("media/abc.tmp"), b"x").expect("放临时文件");
+    fs::write(temp.path("thumbnails/1.tmp"), b"x").expect("放临时文件");
+    // 更深的目录不归 recover 管：留下也不算错。
+    fs::create_dir_all(temp.path("boards/nested")).expect("建深层目录");
+    fs::write(temp.path("boards/nested/deep.tmp"), b"x").expect("放深层临时文件");
+    fs::create_dir_all(temp.path(".trash/old")).expect("建回收站目录");
+    fs::write(temp.path(".trash/old/keep.tmp"), b"x").expect("放回收站临时文件");
+
+    assert_eq!(temp.workspace.recover().expect("清临时文件"), 5);
+    assert!(!temp.path("root.tmp").exists());
+    assert!(!temp.path("boards/1.tmp").exists());
+    assert!(!temp.path("blocks/1-1.tmp").exists());
+    assert!(!temp.path("media/abc.tmp").exists());
+    assert!(!temp.path("thumbnails/1.tmp").exists());
+    assert!(
+        temp.path("boards/nested/deep.tmp").exists(),
+        "深层目录不在扫描范围"
+    );
+    assert!(
+        temp.path(".trash/old/keep.tmp").exists(),
+        "回收站不在扫描范围"
+    );
+}

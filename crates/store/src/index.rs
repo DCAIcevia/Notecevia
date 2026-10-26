@@ -1,15 +1,18 @@
 //! 首页索引：列表、搜索与“打开最近画板”都只读这一份，不再逐板读文件。
 //!
 //! 索引是缓存，不是数据源：画板文件才是唯一事实。索引缺失、格式号不符、
-//! 画板集合对不上（多、少、文件长度或修改时间变了）时整份重建；重建就是逐板读一遍。
+//! 画板集合对不上（多、少）时整份重建；重建就是逐板读一遍。
 //! 索引写不进去也不影响内容——本次先按内存里的用，下次打开再试。
+//!
+//! 校验用目录级指纹：记 boards/ 目录的修改时间与画板文件数，打开时只 readdir 一次。
+//! 外部新增、删除、改名都会改目录时间，能发现；原地覆盖写不改目录时间，发现不了——
+//! 这是有意的取舍（逐板 stat 一万张要两百多毫秒）。要立刻刷新用 rebuild_index()。
 //!
 //! 一致性在每次打开工作区后第一次用到时校验一次；运行期间外部改动要重新打开才能发现。
 
 use std::cell::Ref;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use notecevia_core::board::{Board, Body, Document};
@@ -24,7 +27,8 @@ pub(crate) const INDEX_FILE: &str = "index.cbor";
 /// 索引自己的格式号。字段或内容语义变了就加一，读到不认识的号当没有索引。
 ///
 /// 2：可搜索片段加入表格单元格文字与媒体块文件名，旧索引必须重建。
-const INDEX_FORMAT: i64 = 2;
+/// 3：校验从逐板文件指纹改成 boards/ 目录时间 + 画板数，旧索引必须重建。
+const INDEX_FORMAT: i64 = 3;
 
 /// 列表页的一行。正文不在这里，点开才读。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,13 +54,6 @@ pub struct SearchHit {
 const SNIPPET_BEFORE: usize = 24;
 const SNIPPET_AFTER: usize = 60;
 
-/// 画板文件的一眼指纹：长度与修改时间。和索引里记的不一样就当索引过期。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FileStamp {
-    len: u64,
-    modified: i64,
-}
-
 /// 索引里的一张画板。
 pub(crate) struct IndexedBoard {
     pub title: String,
@@ -68,12 +65,10 @@ pub(crate) struct IndexedBoard {
     pub texts: Vec<String>,
     /// 画板文件读不懂时留个占位：集合对得上，列表与搜索跳过它。
     pub readable: bool,
-    /// 文件指纹；拿不到就当过期，下次打开重建。
-    stamp: Option<FileStamp>,
 }
 
 impl IndexedBoard {
-    fn broken(stamp: Option<FileStamp>) -> Self {
+    fn broken() -> Self {
         Self {
             title: String::new(),
             tags: Vec::new(),
@@ -82,12 +77,11 @@ impl IndexedBoard {
             has_thumbnail: false,
             texts: Vec::new(),
             readable: false,
-            stamp,
         }
     }
 
     fn to_value(&self, id: u64) -> Value {
-        let mut pairs = vec![
+        let pairs = vec![
             ("id", Value::Integer(integer_of(id))),
             ("title", Value::text(self.title.clone())),
             (
@@ -116,24 +110,10 @@ impl IndexedBoard {
                 ),
             ),
         ];
-        if let Some(stamp) = self.stamp {
-            pairs.push(("stamp_len", Value::Integer(integer_of(stamp.len))));
-            pairs.push(("stamp_modified", Value::Integer(stamp.modified)));
-        }
         Value::map(pairs)
     }
 
     fn from_value(value: &Value) -> Option<Self> {
-        let stamp = match (
-            value.get("stamp_len").and_then(Value::as_integer),
-            value.get("stamp_modified").and_then(Value::as_integer),
-        ) {
-            (Some(len), Some(modified)) => Some(FileStamp {
-                len: u64::try_from(len).ok()?,
-                modified,
-            }),
-            _ => None,
-        };
         Some(Self {
             title: value
                 .get("title")
@@ -159,19 +139,20 @@ impl IndexedBoard {
                 .get("readable")
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
-            stamp,
         })
     }
 }
 
-/// 整份索引：画板编号 → 条目。
+/// 整份索引：画板编号 → 条目，外加 boards/ 目录的指纹。
 pub(crate) struct Index {
     pub boards: BTreeMap<u64, IndexedBoard>,
+    /// boards/ 目录的修改时间（Unix 纳秒）。新增/删除/改名会变，原地覆盖不会。
+    boards_mtime: Option<i64>,
 }
 
 impl Index {
     fn to_value(&self) -> Value {
-        Value::map(vec![
+        let mut pairs = vec![
             ("format", Value::Integer(INDEX_FORMAT)),
             (
                 "boards",
@@ -182,7 +163,11 @@ impl Index {
                         .collect(),
                 ),
             ),
-        ])
+        ];
+        if let Some(mtime) = self.boards_mtime {
+            pairs.push(("boards_mtime", Value::Integer(mtime)));
+        }
+        Value::map(pairs)
     }
 
     fn from_value(value: &Value) -> Option<Self> {
@@ -196,7 +181,10 @@ impl Index {
             let id = u64::try_from(id).ok()?;
             map.insert(id, IndexedBoard::from_value(board)?);
         }
-        Some(Self { boards: map })
+        Some(Self {
+            boards: map,
+            boards_mtime: value.get("boards_mtime").and_then(Value::as_integer),
+        })
     }
 }
 
@@ -320,7 +308,6 @@ impl Workspace {
             has_thumbnail: self.thumbnail_path(board_id).is_file(),
             texts: searchable_texts(&document.board, &document.bodies),
             readable: true,
-            stamp: stamp_of_path(&self.board_path(board_id)),
         };
         self.store_entry(board_id, entry)
     }
@@ -328,18 +315,12 @@ impl Workspace {
     /// 画板文件刚被别处写完（比如容器导入）时，按盘上的内容补一条索引。
     pub(crate) fn remember_board_from_disk(&self, board_id: u64) -> Result<(), Error> {
         self.ensure_index()?;
-        let stamp = stamp_of_path(&self.board_path(board_id));
         let entry = match self.read_board_lenient(board_id)? {
             Some(on_disk) => {
                 let bodies = self.load_bodies(board_id, &on_disk);
-                indexed_board(
-                    &on_disk,
-                    &bodies,
-                    self.thumbnail_path(board_id).is_file(),
-                    stamp,
-                )
+                indexed_board(&on_disk, &bodies, self.thumbnail_path(board_id).is_file())
             }
-            None => IndexedBoard::broken(stamp),
+            None => IndexedBoard::broken(),
         };
         self.store_entry(board_id, entry)
     }
@@ -351,6 +332,8 @@ impl Workspace {
                 return Ok(());
             };
             index.boards.insert(board_id, entry);
+            // 写盘会新建/改名画板文件，目录时间跟着变；记下写入后的值。
+            index.boards_mtime = self.boards_modified();
             index.to_value()
         };
         self.write_index_value(&value)
@@ -367,6 +350,7 @@ impl Workspace {
             if index.boards.remove(&board_id).is_none() {
                 return Ok(());
             }
+            index.boards_mtime = self.boards_modified();
             index.to_value()
         };
         self.write_index_value(&value)
@@ -399,46 +383,50 @@ impl Workspace {
         Index::from_value(&value)
     }
 
-    /// 索引与 boards/ 里的画板集合一致吗：数量、编号、文件指纹都要对得上。
+    /// 索引与 boards/ 里的画板集合一致吗：只比目录时间和画板文件数。
+    ///
+    /// 新增、删除、改名都会改目录时间；原地覆盖写不会，所以覆盖写要 rebuild_index()
+    /// 才能刷新。这里刻意不逐板 stat：一万张画板就是一万次系统调用。
     fn matches_boards(&self, index: &Index) -> Result<bool, Error> {
         let ids = self.board_ids()?;
         if ids.len() != index.boards.len() {
             return Ok(false);
         }
-        for id in ids {
-            let Some(board) = index.boards.get(&id) else {
-                return Ok(false);
-            };
-            let Some(expected) = board.stamp else {
-                return Ok(false);
-            };
-            let Ok(metadata) = fs::metadata(self.board_path(id)) else {
-                return Ok(false);
-            };
-            if stamp_of(&metadata) != Some(expected) {
-                return Ok(false);
-            }
+        match (index.boards_mtime, self.boards_modified()) {
+            (Some(expected), Some(actual)) => Ok(expected == actual),
+            _ => Ok(false),
         }
-        Ok(true)
+    }
+
+    /// boards/ 目录的修改时间（Unix 纳秒）；拿不到给 None。
+    fn boards_modified(&self) -> Option<i64> {
+        let modified = fs::metadata(self.root().join("boards"))
+            .ok()?
+            .modified()
+            .ok()?;
+        i64::try_from(modified.duration_since(UNIX_EPOCH).ok()?.as_nanos()).ok()
     }
 
     /// 逐板读一遍，重建整份索引。
     fn build_index(&self) -> Result<Index, Error> {
+        // 先记目录时间再读文件：读的过程中有外部改动，目录时间会再变，下次校验能发现。
+        let boards_mtime = self.boards_modified();
         let mut boards = BTreeMap::new();
         for id in self.board_ids()? {
-            let path = self.board_path(id);
-            let stamp = stamp_of_path(&path);
             let board = match self.read_board_lenient(id)? {
                 Some(on_disk) => {
                     let bodies = self.load_bodies(id, &on_disk);
-                    indexed_board(&on_disk, &bodies, self.thumbnail_path(id).is_file(), stamp)
+                    indexed_board(&on_disk, &bodies, self.thumbnail_path(id).is_file())
                 }
                 // 画板文件读不懂：留占位让集合对得上，列表与搜索跳过它。
-                None => IndexedBoard::broken(stamp),
+                None => IndexedBoard::broken(),
             };
             boards.insert(id, board);
         }
-        Ok(Index { boards })
+        Ok(Index {
+            boards,
+            boards_mtime,
+        })
     }
 
     fn write_index(&self, index: &Index) -> Result<(), Error> {
@@ -455,7 +443,6 @@ fn indexed_board(
     on_disk: &BoardOnDisk,
     bodies: &BTreeMap<u64, Body>,
     has_thumbnail: bool,
-    stamp: Option<FileStamp>,
 ) -> IndexedBoard {
     IndexedBoard {
         title: on_disk.board.title.clone(),
@@ -465,7 +452,6 @@ fn indexed_board(
         has_thumbnail,
         texts: searchable_texts(&on_disk.board, bodies),
         readable: true,
-        stamp,
     }
 }
 
@@ -495,20 +481,6 @@ fn searchable_texts(board: &Board, bodies: &BTreeMap<u64, Body>) -> Vec<String> 
         }
     }
     texts
-}
-
-fn stamp_of(metadata: &fs::Metadata) -> Option<FileStamp> {
-    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(FileStamp {
-        len: metadata.len(),
-        modified: i64::try_from(modified.as_nanos()).ok()?,
-    })
-}
-
-fn stamp_of_path(path: &Path) -> Option<FileStamp> {
-    fs::metadata(path)
-        .ok()
-        .and_then(|metadata| stamp_of(&metadata))
 }
 
 fn integer_of(number: u64) -> i64 {
