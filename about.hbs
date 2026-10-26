@@ -1,0 +1,28 @@
+# 第三方许可
+
+本文件由 `cargo about generate about.hbs` 生成，列出随 notecevia 二进制分发的依赖与其许可全文。不要手工编辑；依赖变化后重新生成，见 `CONTRIBUTING.md`。
+
+同一许可会因各包携带的版权行不同而分成多节，各自列明使用它的包。
+
+## 许可总览
+
+{{#each overview}}
+- {{{name}}}：{{count}} 个包
+{{/each}}
+
+## 许可全文
+
+{{#each licenses}}
+### {{{name}}}
+
+用于：
+
+{{#each used_by}}
+- `{{crate.name}} {{crate.version}}`
+{{/each}}
+
+```
+{{{text}}}
+```
+
+{{/each}}

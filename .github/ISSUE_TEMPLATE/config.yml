@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 路线图
-    url: https://github.com/acvrac/Notecevia/blob/main/docs/roadmap/roadmap.md
+    url: https://github.com/HanYang06/Notecevia/blob/main/docs/roadmap/roadmap.md
     about: 还没做的事与完成标准
   - name: 格式规范
-    url: https://github.com/acvrac/Notecevia/blob/main/docs/design/format.md
+    url: https://github.com/HanYang06/Notecevia/blob/main/docs/design/format.md
     about: 工作区与导出容器的格式

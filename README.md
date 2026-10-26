@@ -1,7 +1,7 @@
 # Notecevia
 
-[![CI](https://github.com/acvrac/Notecevia/actions/workflows/ci.yml/badge.svg)](https://github.com/acvrac/Notecevia/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/acvrac/Notecevia?include_prereleases&label=release)](https://github.com/acvrac/Notecevia/releases)
+[![CI](https://github.com/HanYang06/Notecevia/actions/workflows/ci.yml/badge.svg)](https://github.com/HanYang06/Notecevia/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/HanYang06/Notecevia?include_prereleases&label=release)](https://github.com/HanYang06/Notecevia/releases)
 
 单机离线的桌面画板笔记：一张无限画布上写字，内容存在本机，导出的文件自带全部内容。
 
@@ -58,4 +58,4 @@ cargo test --workspace
 
 ## 许可与参与
 
-Apache-2.0，见 `LICENSE`。提交方式与评审流程见 `CONTRIBUTING.md`。
+Apache-2.0，见 `LICENSE`，版权归 HanYang06（2026）。项目与内嵌字体的署名见 `NOTICE`，随程序分发的第三方 crate 及许可全文见 `THIRD_PARTY_LICENSES.md`。提交方式与评审流程见 `CONTRIBUTING.md`。

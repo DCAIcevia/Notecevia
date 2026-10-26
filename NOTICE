@@ -1,0 +1,10 @@
+Notecevia
+Copyright 2026 HanYang06
+
+本软件随二进制内嵌以下字体，均来自 egui 的默认字体集：
+
+- Ubuntu Light（Ubuntu-Light.ttf），依 Ubuntu Font Licence 1.0 分发；该字体由 Canonical 发布。
+- Hack Regular（Hack-Regular.ttf），Copyright 2018 Source Foundry Authors；包含 Bitstream Vera Sans Mono（Copyright 2003 Bitstream Inc.）与 DejaVu（公有领域）的成果，依 MIT 与 Bitstream Vera 许可分发。
+- egui-icons（egui-icons.ttf），随 egui 项目提供，依 MIT 或 Apache-2.0 分发。
+
+全部第三方 crate 的许可全文与各包版权行见 THIRD_PARTY_LICENSES.md。

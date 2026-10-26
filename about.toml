@@ -1,0 +1,24 @@
+# cargo-about 配置：生成 THIRD_PARTY_LICENSES.md 时使用。
+# accepted 与 deny.toml 的 allow 列表保持一致：依赖带列表外的许可证时生成失败。
+accepted = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "ISC",
+  "MIT",
+  "OFL-1.1",
+  "Ubuntu-font-1.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+# 固定到发布产物使用的目标，避免在别的平台生成时混入只属于该平台的依赖。
+targets = ["x86_64-pc-windows-msvc"]
+
+# 工作区自己的 crate 不是第三方（未发布，版权与许可见仓库根的 LICENSE），不列入本文件。
+[private]
+ignore = true
