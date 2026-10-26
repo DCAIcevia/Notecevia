@@ -1,0 +1,35 @@
+name: License Debug
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 工具链
+        run: cargo --version
+      - name: 生成并输出差异
+        shell: pwsh
+        run: |
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          Write-Output "--- sizes before ---"
+          (Get-Item THIRD_PARTY_LICENSES.md).Length
+          cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
+          Write-Output "--- sizes after ---"
+          (Get-Item THIRD_PARTY_LICENSES.md).Length
+          Write-Output "--- status ---"
+          git status --porcelain
+          Write-Output "--- diffstat ---"
+          git diff --stat
+          Write-Output "--- diff head ---"
+          git diff --unified=1 | Select-Object -First 50
