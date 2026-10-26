@@ -10,6 +10,7 @@ use notecevia_core::BlockKind;
 use crate::board::BoardApp;
 use crate::home::{HomeAction, HomeApp};
 use crate::icons::{self, Icon};
+use crate::library::{Library, LibraryAction};
 use crate::strings;
 use crate::theme;
 
@@ -79,6 +80,10 @@ pub struct ShellOutput {
     pub new_note: bool,
     /// 全局工具栏上按出来的动作。
     pub tool: Option<ToolCommand>,
+    /// 图标条上换了视图。
+    pub view: Option<ViewMode>,
+    /// 册视图按出来的动作。
+    pub library: Option<LibraryAction>,
     /// 菜单栏按出来的命令。
     pub menu: Option<MenuCommand>,
 }
@@ -107,10 +112,16 @@ impl Shell {
         }
     }
 
+    /// 由 app 指定视图（例如从目录点开一页时切回页视图）。
+    pub fn set_view(&mut self, view: ViewMode) {
+        self.view = view;
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut Ui,
         home: &mut HomeApp,
+        mut library: Option<&mut Library>,
         mut board: Option<&mut BoardApp>,
     ) -> ShellOutput {
         let mut output = ShellOutput::default();
@@ -152,7 +163,7 @@ impl Shell {
                 ViewMode::Volume,
                 Icon::Volume,
                 strings::SHELL_VIEW_VOLUME,
-                false,
+                true,
             ),
             (
                 ViewMode::Shelf,
@@ -172,7 +183,10 @@ impl Shell {
                 ),
                 Vec2::splat(RAIL_BUTTON),
             );
-            self.rail_button(ui, rect, icon, label, self.view == mode, ready);
+            if self.rail_button(ui, rect, icon, label, self.view == mode, ready) && ready {
+                self.view = mode;
+                output.view = Some(mode);
+            }
         }
         // 底部的两个收起键：纯图标栏的惯例位置，不占顶栏，也不跟视图混在一起。
         for (index, (icon, tip, open)) in [
@@ -217,19 +231,30 @@ impl Shell {
                 [list.right_top(), list.right_bottom()],
                 Stroke::new(1.0, theme::chrome().line),
             );
-            ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
-                output.home = home.sidebar(ui, &mut self.query);
-            });
+            match self.view {
+                ViewMode::Volume => {
+                    if let Some(library) = library.as_mut() {
+                        ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
+                            output.library = library.sidebar(ui);
+                        });
+                    }
+                }
+                _ => {
+                    ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
+                        output.home = home.sidebar(ui, &mut self.query);
+                    });
+                }
+            }
             main_left = list.max.x;
         }
 
-        // 右侧资源栏：本轮只列名字与大小。
-        let assets = board
-            .as_ref()
-            .map(|board| board.assets())
-            .unwrap_or_default();
+        // 右侧资源栏：只有页视图才有"这一篇的媒体"。
         let mut main_right = body.max.x;
-        if self.assets_open {
+        if self.view == ViewMode::Page && self.assets_open {
+            let assets = board
+                .as_ref()
+                .map(|board| board.assets())
+                .unwrap_or_default();
             let panel = Rect::from_min_size(
                 egui::pos2(body.max.x - ASSETS_WIDTH, body.min.y),
                 Vec2::new(ASSETS_WIDTH, body.height()),
@@ -248,15 +273,30 @@ impl Shell {
             egui::pos2(main_left, body.min.y),
             egui::pos2(main_right, body.max.y),
         );
-        if let Some(board) = board.as_mut() {
-            // 工具栏属于画布：对整块画布全局，不当标签栏，也不横跨侧栏。
-            let toolbar = Rect::from_min_size(main.min, Vec2::new(main.width(), TOOLBAR_HEIGHT));
-            let notice = board.notice().map(|(text, error)| (text.to_owned(), error));
-            self.toolbar(ui, toolbar, notice, Some(&mut *board));
-            let canvas = Rect::from_min_max(egui::pos2(main.min.x, toolbar.max.y), main.max);
-            ui.scope_builder(UiBuilder::new().max_rect(canvas), |ui| board.ui(ui));
-        } else {
-            self.start_state(ui, main, &mut output);
+        match self.view {
+            ViewMode::Volume => {
+                if let Some(library) = library.as_mut() {
+                    ui.scope_builder(UiBuilder::new().max_rect(main), |ui| {
+                        if let Some(action) = library.pages_view(ui) {
+                            output.library = Some(action);
+                        }
+                    });
+                }
+            }
+            _ => {
+                if let Some(board) = board.as_mut() {
+                    // 工具栏属于画布：对整块画布全局，不当标签栏，也不横跨侧栏。
+                    let toolbar =
+                        Rect::from_min_size(main.min, Vec2::new(main.width(), TOOLBAR_HEIGHT));
+                    let notice = board.notice().map(|(text, error)| (text.to_owned(), error));
+                    self.toolbar(ui, toolbar, notice, Some(&mut *board));
+                    let canvas =
+                        Rect::from_min_max(egui::pos2(main.min.x, toolbar.max.y), main.max);
+                    ui.scope_builder(UiBuilder::new().max_rect(canvas), |ui| board.ui(ui));
+                } else {
+                    self.start_state(ui, main, &mut output);
+                }
+            }
         }
         output
     }
@@ -524,7 +564,7 @@ impl Shell {
         label: &str,
         selected: bool,
         ready: bool,
-    ) {
+    ) -> bool {
         let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
         let painter = ui.painter();
         if selected {
@@ -549,7 +589,7 @@ impl Shell {
         } else {
             format!("{label}：{}", strings::SHELL_NOT_YET)
         };
-        let _ = response.on_hover_text(tip);
+        response.on_hover_text(tip).clicked()
     }
 
     /// 图标条底部的收起键：悬停出底，图标比视图键浅一档。
