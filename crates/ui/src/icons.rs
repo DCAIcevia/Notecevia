@@ -21,6 +21,10 @@ pub enum Icon {
     Page,
     Volume,
     Shelf,
+    Shape,
+    Highlight,
+    Text,
+    Table,
     Audio,
     Play,
 }
@@ -123,6 +127,37 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(0.4, 0.16), p(0.4, 0.82));
             line(p(0.54, 0.36), p(0.54, 0.82));
             line(p(0.68, 0.22), p(0.68, 0.82));
+        }
+        Icon::Text => {
+            line(p(0.22, 0.26), p(0.78, 0.26));
+            line(p(0.5, 0.26), p(0.5, 0.78));
+        }
+        Icon::Table => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(0.16, 0.2), p(0.84, 0.8)),
+                CornerRadius::same(1),
+                stroke,
+                StrokeKind::Inside,
+            );
+            line(p(0.16, 0.5), p(0.84, 0.5));
+            line(p(0.5, 0.2), p(0.5, 0.8));
+        }
+        Icon::Shape => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(0.14, 0.2), p(0.56, 0.6)),
+                CornerRadius::same(1),
+                stroke,
+                StrokeKind::Inside,
+            );
+            painter.circle_stroke(p(0.66, 0.66), 0.17 * size, stroke);
+        }
+        Icon::Highlight => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![p(0.28, 0.66), p(0.62, 0.3), p(0.74, 0.42), p(0.4, 0.78)],
+                Color32::TRANSPARENT,
+                stroke,
+            ));
+            line(p(0.24, 0.86), p(0.46, 0.78));
         }
         Icon::Image => {
             painter.rect_stroke(
