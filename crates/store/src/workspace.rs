@@ -36,19 +36,27 @@ const THUMBNAILS_DIR: &str = "thumbnails";
 /// 回收站目录名。放在工作区里，整个工作区拷走时一起带走。
 pub(crate) const TRASH_DIR: &str = ".trash";
 
+/// 回收站条目留多久：30 天。参照 Windows 回收站，过了就真删，不再占用户的盘。
+const TRASH_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+
 /// 一个工作区目录。
 pub struct Workspace {
     root: PathBuf,
     /// 首页索引的内存副本。第一次用到时从 index.cbor 读，缺失或过期就重建。
     pub(crate) index: RefCell<Option<Index>>,
+    /// 这次打开时从回收站清掉的过期条目数，要不要提示由上层决定。
+    purged_on_open: usize,
 }
 
 impl Workspace {
     /// 打开或建立工作区。目录不存在就建，已有的内容不动。
+    ///
+    /// 顺手清一遍回收站里放了超过保留期的条目；清不掉的跳过，不影响打开。
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, Error> {
-        let workspace = Self {
+        let mut workspace = Self {
             root: root.into(),
             index: RefCell::new(None),
+            purged_on_open: 0,
         };
         for dir in [
             BOARDS_DIR,
@@ -60,9 +68,18 @@ impl Workspace {
         ] {
             fs::create_dir_all(workspace.root.join(dir))?;
         }
+        // 清理失败只当没清：回收站里的东西坏了，不该让人打不开自己的笔记。
+        workspace.purged_on_open = workspace.purge_trash(now_seconds()).unwrap_or_default();
         // 页永远属于一个册，所以默认册必须先有：缺了就建，已经在了一个字节都不动。
         workspace.ensure_empty_book()?;
         Ok(workspace)
+    }
+
+    /// 这次打开工作区时从回收站清掉的过期条目数。
+    ///
+    /// 这里不打印、不提示：要不要告诉用户由上层决定。
+    pub fn purged_on_open(&self) -> usize {
+        self.purged_on_open
     }
 
     pub fn root(&self) -> &Path {
@@ -289,6 +306,40 @@ impl Workspace {
         Ok(removed)
     }
 
+    /// 清掉回收站里放了超过保留期的条目，返回清掉的条数。
+    ///
+    /// 条目名形如 `<stamp>-board-<id>`、`<stamp>-volume-<id>`、`<stamp>-shelf-<id>`，
+    /// 孤儿块回收的 `<stamp>-blocks` 也一样；stamp 是删除时的秒级时间戳，取名字最前面
+    /// 那一段。读不出时间戳的条目（手改过名、旧版本留下的）按它自己的修改时间算，
+    /// 不去猜名字里的数字。
+    ///
+    /// 删不掉的条目跳过，下次打开再试：一个坏条目不该中断整次清理，更不该让工作区
+    /// 打不开，所以单个失败只影响它自己。只有连 `.trash` 都读不了才算错误。
+    pub fn purge_trash(&self, now_seconds: i64) -> Result<usize, Error> {
+        let trash = self.root.join(TRASH_DIR);
+        let entries = match fs::read_dir(&trash) {
+            Ok(entries) => entries,
+            // 从没删过东西的工作区没有 .trash，不算错误。
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
+        let mut purged = 0;
+        for entry in entries.flatten() {
+            let Some(deleted_at) = trash_entry_deleted_at(&entry) else {
+                // 连修改时间都读不出来：留着，下次再试。
+                continue;
+            };
+            // 严格超过 30 天才删，正好 30 天算还没到期；时钟被调前时给 0，不删。
+            if now_seconds.saturating_sub(deleted_at) <= TRASH_RETENTION_SECONDS {
+                continue;
+            }
+            if remove_trash_entry(&entry.path()) {
+                purged += 1;
+            }
+        }
+        Ok(purged)
+    }
+
     pub(crate) fn board_path(&self, board_id: u64) -> PathBuf {
         self.root.join(BOARDS_DIR).join(format!("{board_id}.board"))
     }
@@ -491,6 +542,38 @@ fn remove_temp_files(dir: &Path) -> usize {
         .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("tmp"))
         .filter(|entry| fs::remove_file(entry.path()).is_ok())
         .count()
+}
+
+/// 一个回收站条目是哪天删的：先读名字最前面的秒级时间戳，读不出来按修改时间。
+fn trash_entry_deleted_at(entry: &fs::DirEntry) -> Option<i64> {
+    if let Some(stamp) = entry.file_name().to_str().and_then(stamp_in_name) {
+        return Some(stamp);
+    }
+    let elapsed = entry
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?;
+    i64::try_from(elapsed.as_secs()).ok()
+}
+
+/// 条目名最前面那一段是删除时间戳：取第一个连字符之前的部分，不是数字就不认。
+fn stamp_in_name(name: &str) -> Option<i64> {
+    let head = name.split_once('-').map_or(name, |(head, _)| head);
+    head.parse::<i64>().ok()
+}
+
+/// 删掉一个回收站条目，删成功给 true。
+///
+/// 用 symlink_metadata 看类型：回收站里的软链接只删链接本身，不跟着它走进别处。
+fn remove_trash_entry(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).is_ok(),
+        Ok(_) => fs::remove_file(path).is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// 先写临时文件、落盘后再改名。改名是同目录的原子操作，
