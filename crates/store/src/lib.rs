@@ -2,11 +2,22 @@
 
 //! 文件读写、索引与格式迁移。
 
+mod base64;
 pub mod cbor;
+mod container;
+mod digest;
+mod error;
+mod format;
+mod html;
+mod index;
+mod paths;
+mod transfer;
 pub mod workspace;
 
+pub use error::Error;
+pub use index::{BoardInfo, SearchHit};
 pub use notecevia_core::Document;
-pub use workspace::{Error, Workspace};
+pub use workspace::Workspace;
 
 use std::path::{Path, PathBuf};
 

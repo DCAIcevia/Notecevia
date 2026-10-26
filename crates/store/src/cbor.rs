@@ -13,6 +13,7 @@ use thiserror::Error;
 pub enum Value {
     Integer(i64),
     Float(f64),
+    Bool(bool),
     Text(String),
     Array(Vec<Value>),
     /// 保持写入顺序，不排序：映射都很小，字节稳定比查找快重要。
@@ -54,6 +55,13 @@ impl Value {
     pub fn as_float(&self) -> Option<f64> {
         match self {
             Self::Float(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(*value),
             _ => None,
         }
     }
@@ -101,6 +109,9 @@ fn write(value: &Value, out: &mut Vec<u8>) {
     match value {
         Value::Integer(number) if *number >= 0 => head(0, *number as u64, out),
         Value::Integer(number) => head(1, (-1 - *number) as u64, out),
+        // 布尔用主类型 7 的两个短形式位，和 CBOR 的规定一致。
+        Value::Bool(false) => out.push(0xf4),
+        Value::Bool(true) => out.push(0xf5),
         Value::Float(number) => {
             out.push(0xfb);
             out.extend_from_slice(&number.to_bits().to_be_bytes());
@@ -229,7 +240,12 @@ impl Reader<'_> {
                 }
                 Ok(Value::Map(pairs))
             }
-            7 => Ok(Value::Float(f64::from_bits(length))),
+            // 0xf4 / 0xf5 是假与真，其余长度位按双精度浮点解释。
+            7 => match length {
+                20 => Ok(Value::Bool(false)),
+                21 => Ok(Value::Bool(true)),
+                _ => Ok(Value::Float(f64::from_bits(length))),
+            },
             other => Err(CborError::UnsupportedMajor(other)),
         }
     }
@@ -248,6 +264,14 @@ mod tests {
         assert_eq!(encode(&Value::Integer(-1)), vec![0x20]);
         assert_eq!(encode(&Value::Integer(-2)), vec![0x21]);
         assert_eq!(encode(&Value::Text("a".to_owned())), vec![0x61, b'a']);
+    }
+
+    #[test]
+    fn bools_use_the_standard_short_form() {
+        assert_eq!(encode(&Value::Bool(false)), vec![0xf4]);
+        assert_eq!(encode(&Value::Bool(true)), vec![0xf5]);
+        assert_eq!(decode(&[0xf4]), Ok(Value::Bool(false)));
+        assert_eq!(decode(&[0xf5]), Ok(Value::Bool(true)));
     }
 
     #[test]
