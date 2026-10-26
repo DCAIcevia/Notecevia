@@ -144,7 +144,9 @@ impl App {
             return;
         }
         let result = match (&self.workspace, &self.board) {
-            (Some(workspace), Some(board)) => workspace.save(self.board_id, board.document()),
+            (Some(workspace), Some(board)) => {
+                workspace.save_changed(self.board_id, board.document(), &board.changed_bodies())
+            }
             _ => return,
         };
         match result {
@@ -801,6 +803,7 @@ fn main() -> eframe::Result {
     let mut export_check = false;
     let mut timing = false;
     let mut frame_stats = None;
+    let mut nudge = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -814,6 +817,7 @@ fn main() -> eframe::Result {
             Some("--export-image") => image_check = true,
             Some("--export-all") => export_check = true,
             Some("--timing") => timing = true,
+            Some("--nudge") => nudge = true,
             Some("--frame-stats") => {
                 frame_stats = args
                     .next()
@@ -883,13 +887,16 @@ fn main() -> eframe::Result {
             }
 
             // 截图与交互检查要直接进画布；普通启动停在首页。
-            let force_board = !home && (stress || edit || select || app.shot.is_some());
+            let force_board = !home && (stress || edit || select || nudge || app.shot.is_some());
             if force_board {
                 app.open_latest_or_create();
             }
             if let Some(board) = &mut app.board {
                 if stress {
                     board.spawn_stress();
+                }
+                if nudge {
+                    board.nudge_first_text();
                 }
                 if select {
                     board.select_first();
