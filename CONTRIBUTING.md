@@ -41,4 +41,4 @@ cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
 
 推 `v*` 标签触发发布流程：CI 跑门禁、构建、打包并创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。
 
-发布流程校验标签与 `notecevia-app` 的版本一致，不一致即失败；产物附 SHA256 校验和。
+发布流程校验标签与 `notecevia-app` 的版本一致、标签提交在 `main` 上，不一致即失败；产物附 SHA256 校验和。发布先创建草稿并上传资产，再转为正式发布；`v*` 标签由 ruleset 保护，不能删除或移动。
