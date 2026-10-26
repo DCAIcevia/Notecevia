@@ -22,7 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Verify tag is on main
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag commit $env:GITHUB_SHA is not reachable from main"
+          }
       - name: Set up Rust toolchain
         # rustup 代理按 rust-toolchain.toml 安装固定版本与组件。
         run: rustup show
@@ -64,5 +73,12 @@ jobs:
           files: |
             notecevia-${{ github.ref_name }}-windows.zip
             notecevia-${{ github.ref_name }}-windows.zip.sha256
+          # 仓库开启了 immutable releases：先建草稿并上传资产，发布后再上传会被拒绝。
+          draft: true
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+      - name: Publish the draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit $env:GITHUB_REF_NAME --draft=false
