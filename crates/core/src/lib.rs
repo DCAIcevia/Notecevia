@@ -5,6 +5,7 @@
 pub mod arrange;
 pub mod board;
 pub mod history;
+pub mod volume;
 
 pub use arrange::{Alignment, Axis};
 pub use board::{
@@ -12,6 +13,7 @@ pub use board::{
     MediaBlock, ShapeBlock, ShapeKind, TableBlock, TextBlock,
 };
 pub use history::History;
+pub use volume::{Shelf, Volume};
 
 /// 当前 crate 版本。
 pub fn version() -> &'static str {

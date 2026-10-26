@@ -22,4 +22,6 @@ pub enum Error {
     BadContainer(&'static str),
     #[error("这个文件由更高版本的程序写入（格式 {found}，本程序支持 {supported}），请升级程序")]
     NewerFormat { found: i64, supported: i64 },
+    #[error("Empty book 是默认册，不能删除")]
+    CannotDeleteEmptyBook,
 }

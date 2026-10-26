@@ -12,12 +12,16 @@ mod html;
 mod index;
 mod migrate;
 mod paths;
+mod shelves;
 mod transfer;
+mod volumes;
 pub mod workspace;
 
 pub use error::Error;
 pub use index::{BoardInfo, SearchHit};
 pub use notecevia_core::Document;
+pub use shelves::ShelfInfo;
+pub use volumes::VolumeInfo;
 pub use workspace::Workspace;
 
 use std::path::{Path, PathBuf};

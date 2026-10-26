@@ -69,8 +69,8 @@ fn body_keys(kind: BlockKind) -> &'static [&'static str] {
     }
 }
 
-/// 文件里认不出的键值对，顺序与文件里一致。
-fn unknown_fields(value: &Value, known: &[&str]) -> Vec<(Value, Value)> {
+/// 文件里认不出的键值对，顺序与文件里一致。册与书架文件也用这一份。
+pub(crate) fn unknown_fields(value: &Value, known: &[&str]) -> Vec<(Value, Value)> {
     let Some(pairs) = value.as_map() else {
         return Vec::new();
     };
@@ -529,7 +529,7 @@ fn color_text([red, green, blue]: [u8; 3]) -> String {
     format!("#{red:02x}{green:02x}{blue:02x}")
 }
 
-fn integer_of(id: u64) -> i64 {
+pub(crate) fn integer_of(id: u64) -> i64 {
     i64::try_from(id).unwrap_or(i64::MAX)
 }
 

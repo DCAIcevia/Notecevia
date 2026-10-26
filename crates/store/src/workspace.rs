@@ -1,4 +1,4 @@
-//! 工作区：一个目录，里面放画板文件、块文件、媒体池与回收站。
+//! 工作区：一个目录，里面放画板文件、块文件、册与书架文件、媒体池与回收站。
 //!
 //! 布局与字段名按 docs/design/format.md：画板一张一个文件，正文按块编号单独存，
 //! 目录项用 block_ref 指向块（工作区内是相对路径），媒体按内容哈希进媒体池。
@@ -24,6 +24,8 @@ use crate::format::{self, BoardOnDisk};
 use crate::index::{INDEX_FILE, Index};
 use crate::migrate;
 use crate::paths;
+use crate::shelves::SHELVES_DIR;
+use crate::volumes::VOLUMES_DIR;
 
 pub use crate::error::Error;
 
@@ -32,7 +34,7 @@ const BLOCKS_DIR: &str = "blocks";
 const MEDIA_DIR: &str = "media";
 const THUMBNAILS_DIR: &str = "thumbnails";
 /// 回收站目录名。放在工作区里，整个工作区拷走时一起带走。
-const TRASH_DIR: &str = ".trash";
+pub(crate) const TRASH_DIR: &str = ".trash";
 
 /// 一个工作区目录。
 pub struct Workspace {
@@ -48,9 +50,18 @@ impl Workspace {
             root: root.into(),
             index: RefCell::new(None),
         };
-        for dir in [BOARDS_DIR, BLOCKS_DIR, MEDIA_DIR, THUMBNAILS_DIR] {
+        for dir in [
+            BOARDS_DIR,
+            BLOCKS_DIR,
+            MEDIA_DIR,
+            THUMBNAILS_DIR,
+            VOLUMES_DIR,
+            SHELVES_DIR,
+        ] {
             fs::create_dir_all(workspace.root.join(dir))?;
         }
+        // 页永远属于一个册，所以默认册必须先有：缺了就建，已经在了一个字节都不动。
+        workspace.ensure_empty_book()?;
         Ok(workspace)
     }
 
@@ -179,7 +190,8 @@ impl Workspace {
         Ok(())
     }
 
-    /// 删掉一张画板：画板文件、它的块文件与缩略图一起移进回收站，媒体留着。
+    /// 删掉一张画板：先从所有册里摘下它，再把画板文件、它的块文件与缩略图一起移进
+    /// 回收站，媒体留着。页文件里不记归属，所以摘除只能由这里来做。
     pub fn delete_board(&self, board_id: u64) -> Result<(), Error> {
         let board = self.board_path(board_id);
         let thumbnail = self.thumbnail_path(board_id);
@@ -191,7 +203,10 @@ impl Workspace {
         if !board.exists() && blocks.is_empty() && !thumbnail.exists() {
             return Ok(());
         }
-        let folder = format!("{}-board-{board_id}", now_seconds());
+        let stamp = now_seconds();
+        // 先摘册：摘不掉就别删页，免得册里留下指向空处的编号。
+        self.detach_page(board_id, None, stamp)?;
+        let folder = format!("{stamp}-board-{board_id}");
         if board.exists() {
             self.move_to_trash(&board, &folder)?;
         }
@@ -256,8 +271,8 @@ impl Workspace {
 
     /// 清掉工作区里上次崩溃留下的 *.tmp，返回清掉的条数。启动时调一次。
     ///
-    /// 只扫根目录与 boards/、blocks/、media/、thumbnails/ 这一层：原子写用的临时文件
-    /// 都落在目标文件旁边，别的目录（.trash、exports）里的东西不归这里管。
+    /// 只扫根目录与 boards/、blocks/、media/、thumbnails/、volumes/、shelves/ 这一层：
+    /// 原子写用的临时文件都落在目标文件旁边，别的目录（.trash、exports）里的东西不归这里管。
     pub fn recover(&self) -> Result<usize, Error> {
         let mut removed = 0;
         for dir in [
@@ -266,6 +281,8 @@ impl Workspace {
             self.root.join(BLOCKS_DIR),
             self.root.join(MEDIA_DIR),
             self.root.join(THUMBNAILS_DIR),
+            self.root.join(VOLUMES_DIR),
+            self.root.join(SHELVES_DIR),
         ] {
             removed += remove_temp_files(&dir);
         }
@@ -394,7 +411,7 @@ impl Workspace {
     }
 
     /// 把文件移进 .trash/<folder>/。同名的已经在了就加序号，不覆盖回收站里的东西。
-    fn move_to_trash(&self, path: &Path, folder: &str) -> Result<(), Error> {
+    pub(crate) fn move_to_trash(&self, path: &Path, folder: &str) -> Result<(), Error> {
         if !path.exists() {
             return Ok(());
         }
@@ -499,7 +516,7 @@ fn hash_file_name(media: &str) -> Option<String> {
     }
 }
 
-fn now_seconds() -> i64 {
+pub(crate) fn now_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX))
