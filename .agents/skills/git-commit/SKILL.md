@@ -1,11 +1,11 @@
 ---
 name: git-commit
-description: 在 Notecevia 仓库里提交改动、拆分提交、写提交信息或发 PR 时加载。它说明本仓库的 Conventional Commits 格式与类型、提交怎么拆、门禁怎么跑，以及 main 受保护后必须走"分支 → PR → 批准 → merge commit"的流程。只要任务最后要落成一个提交，就先读它。
+description: 在 Notecevia 仓库里提交改动、拆分提交、写提交信息或发 PR 时加载。它说明本仓库的 Conventional Commits 格式与类型、提交怎么拆、门禁怎么跑，以及 main 受保护后必须走"分支 → PR → 必检项通过 → merge commit"的流程。只要任务最后要落成一个提交，就先读它。
 ---
 
 # Git 提交
 
-仓库由他人维护（HanYang06），`main` 上有 ruleset 保护：禁止直接推送、禁止强推、必须走 PR 且至少一个批准、合并方式只允许 merge commit。这不是本项目的偏好，是仓库的硬约束——直接推会被 GitHub 拒绝，所以流程只能照它来。
+仓库由他人维护（HanYang06），`main` 上有 ruleset 保护：禁止直接推送、禁止强推、必须走 PR、合并方式只允许 merge commit，合并前必检项必须通过。这不是本项目的偏好，是仓库的硬约束——直接推会被 GitHub 拒绝，所以流程只能照它来。单人维护，不要求外部批准。
 
 ## 提交前先看仓库
 
@@ -49,11 +49,11 @@ scope：`core`、`store`、`ui`、`app`、`skills`、`ci`；跨模块时省略�
 
 改动一律走短分支：`<type>/<scope>-<主题>`，kebab-case、≤48 字符，例如 `feat/editor-autosave`。分支名要让人一眼看出对应什么工作，所以禁用 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
 
-流程：推分支 → 开 PR → 至少一个批准（HanYang06）→ merge commit 合并 → 删除分支。
+流程：推分支 → 开 PR → 必检项通过且分支与 `main` 同步 → merge commit 合并（仓库自动删分支）。
 
-一个里程碑一个 PR：改动先在分支上累积，达到里程碑的退出标准再合并；不要每件事开一个 PR。仓库没有开启合并后自动删分支，所以要自己删。
+一个里程碑一个 PR：改动先在分支上累积，达到里程碑的退出标准再合并；不要每件事开一个 PR。仓库已开启合并后自动删分支。
 
-推送前确认提交邮箱已关联 GitHub 账号（本仓库开启了"未归属提交需要额外批准"）。不 force-push，不改写别人的分支历史。
+推送前确认提交邮箱已关联 GitHub 账号。不 force-push，不改写别人的分支历史。
 
 ## 安全
 
