@@ -20,22 +20,27 @@ env:
 
 jobs:
   gate:
-    name: 门禁（${{ matrix.os }}）
+    # 检查名固定为平台标签，runner 版本升级时不改动必检项。
+    name: Gate (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: windows
+            os: windows-latest
     steps:
-      - name: 检出
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 工具链
+      - name: Set up Rust toolchain
         # rustup 代理按 rust-toolchain.toml 安装固定版本与组件。
-        run: cargo --version
-      - name: Linux 构建依赖
+        run: rustup show
+      - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -43,11 +48,28 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev \
             libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
             libfontconfig1-dev
-      - name: 编译缓存
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: rustfmt
+      - name: Check formatting
         run: cargo fmt --all --check
-      - name: clippy
+      - name: Lint with Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: test
+      - name: Run tests
         run: cargo test --workspace --locked
+      - name: Build documentation
+        if: runner.os == 'Linux'
+        run: cargo doc --workspace --no-deps --locked
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit dependencies
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories licenses sources

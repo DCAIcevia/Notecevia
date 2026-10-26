@@ -1,52 +1,60 @@
 name: Audit
 
+# 每周做一次完整审计；依赖相关文件变化时只校验许可证清单是否与依赖图一致。
 on:
   schedule:
     - cron: "30 3 * * 1"
   push:
     branches: [main]
-    paths:
+    paths: &dependency-paths
       - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/*/Cargo.toml"
+      - "deny.toml"
+      - "about.toml"
+      - "about.hbs"
+      - "THIRD_PARTY_LICENSES.md"
+      - ".github/actions/verify-licenses/**"
       - ".github/workflows/audit.yml"
+  pull_request:
+    paths: *dependency-paths
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   deny:
-    name: 依赖审计
+    name: Advisory audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: 检出
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 审计
+      - name: Audit dependencies
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           # 已知漏洞、许可证与依赖来源。
           command: check advisories licenses sources
 
   licenses:
-    name: 三方许可
+    name: Third-party licenses
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - name: 检出
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 工具链
+      - name: Set up Rust toolchain
         # rustup 代理按 rust-toolchain.toml 安装固定版本与组件。
-        run: cargo --version
-      - name: 生成并比对
-        shell: pwsh
-        run: |
-          # 版本与 CONTRIBUTING 记录的生成命令一致；升级 cargo-about 时两处一起改。
-          cargo install cargo-about --version 0.9.2 --locked --features cli
-          cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
-          if (git status --porcelain -- THIRD_PARTY_LICENSES.md) {
-            throw "THIRD_PARTY_LICENSES.md 与当前依赖不一致，重新生成并提交"
-          }
+        run: rustup show
+      - name: Verify third-party licenses
+        uses: ./.github/actions/verify-licenses

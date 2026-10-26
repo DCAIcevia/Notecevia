@@ -44,7 +44,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-工具链用 Rust 1.85 以上，workspace 是 edition 2024。
+工具链由 `rust-toolchain.toml` 固定为 1.99.0，workspace 是 edition 2024；CI 另构建文档并审计依赖。
 
 ## 数据位置
 
