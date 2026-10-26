@@ -1,9 +1,21 @@
-# cargo-deny 配置；检查项由 .github/workflows/audit.yml 指定。
+# cargo-deny 配置；检查项由 .github/workflows/audit.yml 与 ci.yml 指定。
 
 [advisories]
-# 传递依赖里的 unmaintained 不报错，只对工作区直接依赖报错。
-unmaintained = "workspace"
-yanked = "warn"
+# 传递依赖的 unmaintained 也报错；当前无法自行修复的上游项逐条记在 ignore 里。
+unmaintained = "all"
+# 锁文件里出现被 yank 的版本即失败。
+yanked = "deny"
+# 上游升级后如果某条 advisory 不再命中，cargo-deny 会以 advisory-not-detected 告警，据此清理本列表。
+ignore = [
+  # ttf-parser 0.25.1：ab_glyph → sctk-adwaita → winit 拉入，winit 换掉 ab_glyph 后删除。
+  "RUSTSEC-2026-0192",
+  # zvariant 5.15.1：accesskit_unix → accesskit_atspi_common 拉入，accesskit 迁移到 zbus 6 后删除。
+  "RUSTSEC-2026-0370",
+  # zbus_names 4.3.5：同上。
+  "RUSTSEC-2026-0371",
+  # zvariant_derive 5.15.1：同上。
+  "RUSTSEC-2026-0372",
+]
 
 [licenses]
 # 允许列表按当前依赖图设定；依赖带来列表外的许可证时审计失败，需要单独确认后再加。
@@ -22,6 +34,13 @@ allow = [
   "Unlicense",
   "Zlib",
 ]
+
+[bans]
+# 注册表依赖不得写通配符版本；workspace 内部 crate 的 path 依赖不带 version 是正常写法，放行。
+wildcards = "deny"
+allow-wildcard-paths = true
+# 已知重复版本全部来自 egui/eframe/winit/wgpu 上游，本仓库无法消除，只告警不失败。
+multiple-versions = "warn"
 
 [sources]
 # 依赖只允许来自 crates.io。

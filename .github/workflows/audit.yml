@@ -41,8 +41,8 @@ jobs:
       - name: Audit dependencies
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          # 已知漏洞、许可证与依赖来源。
-          command: check advisories licenses sources
+          # 已知漏洞、许可证、重复版本与依赖来源。
+          command: check all
 
   licenses:
     name: Third-party licenses
