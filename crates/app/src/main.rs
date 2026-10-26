@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use eframe::egui;
 use notecevia_core::{BlockKind, Document};
@@ -20,6 +20,8 @@ const AUTOSAVE_SECONDS: f64 = 2.0;
 const THUMBNAIL_SECONDS: f64 = 5.0;
 /// 缩略图宽度，像素。
 const THUMBNAIL_WIDTH: u32 = 320;
+/// 首页看外部改动的间隔，秒。
+const WATCH_SECONDS: f64 = 2.0;
 
 /// 按内容哈希读媒体。界面只拿字节，路径校验留在这里。
 struct DiskMedia {
@@ -71,6 +73,10 @@ struct App {
     thumbnail_check: bool,
     /// 开发检查用：跑起来截一张当前画布，确认导出图片的链路通。
     image_check: bool,
+    /// boards/ 目录上一次看到的修改时间，用来发现外部改动。
+    boards_stamp: Option<SystemTime>,
+    /// 上一次检查外部改动的时间。
+    last_watch_at: f64,
 }
 
 impl App {
@@ -90,6 +96,8 @@ impl App {
             last_thumbnail_at: f64::NEG_INFINITY,
             thumbnail_check: false,
             image_check: false,
+            boards_stamp: None,
+            last_watch_at: 0.0,
         }
     }
 
@@ -119,6 +127,7 @@ impl App {
                     board.set_status(strings::SAVED);
                 }
                 self.want_thumbnail = true;
+                self.note_workspace_stamp();
             }
             Err(error) => self.status(strings::save_failed(error)),
         }
@@ -226,6 +235,7 @@ impl App {
                     }
                 }
                 self.refresh_boards();
+                self.note_workspace_stamp();
             }
             HomeAction::Rename(id, title) => {
                 self.update_board(
@@ -261,6 +271,34 @@ impl App {
             }
         }
         self.refresh_boards();
+        self.note_workspace_stamp();
+    }
+
+    /// boards/ 目录的修改时间。新建、删除、改名与原子写都会动它。
+    fn workspace_stamp(&self) -> Option<SystemTime> {
+        let dir = self.workspace.as_ref()?.root().join("boards");
+        std::fs::metadata(dir).ok()?.modified().ok()
+    }
+
+    /// 自己的写盘也会动目录时间，记一下，免得回家时把自己当成外部改动。
+    fn note_workspace_stamp(&mut self) {
+        self.boards_stamp = self.workspace_stamp();
+    }
+
+    /// 停在首页时每两秒看一次 boards/，外部改过就重建索引并刷新列表。
+    fn watch_external_changes(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        if now - self.last_watch_at >= WATCH_SECONDS {
+            self.last_watch_at = now;
+            let stamp = self.workspace_stamp();
+            if let (Some(previous), Some(current)) = (self.boards_stamp, stamp)
+                && previous != current
+            {
+                self.refresh_index();
+            }
+            self.boards_stamp = stamp;
+        }
+        ctx.request_repaint_after(Duration::from_secs(2));
     }
 
     /// 读出画板、改一处、写回去。重命名和改标签都走这条路。
@@ -290,6 +328,7 @@ impl App {
             }
         }
         self.refresh_boards();
+        self.note_workspace_stamp();
     }
 
     fn search(&mut self, query: &str) {
@@ -410,6 +449,7 @@ impl App {
             }
         }
         self.refresh_boards();
+        self.note_workspace_stamp();
     }
 
     /// 双击媒体块时用系统默认程序打开，不自己解码播放。
@@ -593,6 +633,7 @@ impl eframe::App for App {
             }
         } else {
             self.handle_dropped_files(&ctx);
+            self.watch_external_changes(&ctx);
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::R)) {
                 self.refresh_index();
             }
@@ -700,6 +741,7 @@ fn main() -> eframe::Result {
                     }));
                     app.can_save = true;
                     app.refresh_boards();
+                    app.note_workspace_stamp();
                     if recovered > 0 {
                         app.home.set_status(strings::RECOVERED);
                     }
