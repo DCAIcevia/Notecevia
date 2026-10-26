@@ -75,6 +75,8 @@ struct App {
     thumbnail_check: bool,
     /// 开发检查用：跑起来截一张当前画布，确认导出图片的链路通。
     image_check: bool,
+    /// 开发检查用：跑起来把当前画板导出容器与 HTML，确认导出链路通。
+    export_check: bool,
     /// boards/ 目录上一次看到的修改时间，用来发现外部改动。
     boards_stamp: Option<SystemTime>,
     /// 上一次检查外部改动的时间。
@@ -99,6 +101,7 @@ impl App {
             restore_thumbnail_view: false,
             thumbnail_check: false,
             image_check: false,
+            export_check: false,
             boards_stamp: None,
             last_watch_at: 0.0,
         }
@@ -672,6 +675,10 @@ impl eframe::App for App {
         if self.frames == 10 && self.thumbnail_check {
             self.save();
         }
+        if self.frames == 8 && self.export_check && self.board.is_some() {
+            self.export(self.board_id, ExportKind::Container);
+            self.export(self.board_id, ExportKind::Html);
+        }
         if self.frames == 15 && self.image_check {
             let rect = self.board.as_ref().map(BoardApp::canvas_rect);
             let dir = self.workspace.as_ref().map(|it| it.root().join("exports"));
@@ -715,6 +722,7 @@ fn main() -> eframe::Result {
     let mut home = false;
     let mut thumbnail_check = false;
     let mut image_check = false;
+    let mut export_check = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -726,6 +734,7 @@ fn main() -> eframe::Result {
             Some("--home") => home = true,
             Some("--thumbnail") => thumbnail_check = true,
             Some("--export-image") => image_check = true,
+            Some("--export-all") => export_check = true,
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -750,6 +759,7 @@ fn main() -> eframe::Result {
             let mut app = App::new(shot.clone());
             app.thumbnail_check = thumbnail_check;
             app.image_check = image_check;
+            app.export_check = export_check;
             match Workspace::open(&root) {
                 Ok(workspace) => {
                     let recovered = workspace.recover().unwrap_or(0);
