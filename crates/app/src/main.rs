@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui;
 use notecevia_core::{BlockKind, Document};
@@ -81,6 +81,12 @@ struct App {
     boards_stamp: Option<SystemTime>,
     /// 上一次检查外部改动的时间。
     last_watch_at: f64,
+    /// 开发检查用：打印从进程启动到首帧的耗时。
+    timing: bool,
+    /// 已经打过耗时了。
+    timed: bool,
+    /// 进程启动的时刻。
+    started: Instant,
 }
 
 impl App {
@@ -104,6 +110,9 @@ impl App {
             export_check: false,
             boards_stamp: None,
             last_watch_at: 0.0,
+            timing: false,
+            timed: false,
+            started: Instant::now(),
         }
     }
 
@@ -615,6 +624,10 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.timing && !self.timed {
+            self.timed = true;
+            eprintln!("冷启动到首帧：{} ms", self.started.elapsed().as_millis());
+        }
         self.take_capture_result();
         if self.board.is_some() {
             if std::mem::take(&mut self.restore_thumbnail_view)
@@ -723,6 +736,7 @@ fn main() -> eframe::Result {
     let mut thumbnail_check = false;
     let mut image_check = false;
     let mut export_check = false;
+    let mut timing = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -735,6 +749,7 @@ fn main() -> eframe::Result {
             Some("--thumbnail") => thumbnail_check = true,
             Some("--export-image") => image_check = true,
             Some("--export-all") => export_check = true,
+            Some("--timing") => timing = true,
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -747,6 +762,7 @@ fn main() -> eframe::Result {
             .with_min_inner_size([720.0, 420.0]),
         ..Default::default()
     };
+    let started = Instant::now();
     eframe::run_native(
         "Notecevia",
         options,
@@ -756,12 +772,17 @@ fn main() -> eframe::Result {
             }
 
             let root = notecevia_store::workspace_root();
+            let opened_at;
+            let listed_at;
             let mut app = App::new(shot.clone());
             app.thumbnail_check = thumbnail_check;
             app.image_check = image_check;
             app.export_check = export_check;
+            app.timing = timing;
+            app.started = started;
             match Workspace::open(&root) {
                 Ok(workspace) => {
+                    opened_at = started.elapsed();
                     let recovered = workspace.recover().unwrap_or(0);
                     app.workspace = Some(workspace);
                     app.home = HomeApp::with_thumbnails(Box::new(DiskThumbnails {
@@ -769,15 +790,26 @@ fn main() -> eframe::Result {
                     }));
                     app.can_save = true;
                     app.refresh_boards();
+                    listed_at = started.elapsed();
                     app.note_workspace_stamp();
                     if recovered > 0 {
                         app.home.set_status(strings::RECOVERED);
                     }
                 }
                 Err(error) => {
+                    opened_at = started.elapsed();
+                    listed_at = opened_at;
                     let message = strings::workspace_failed(root.display(), error);
                     app.home.set_status(message);
                 }
+            }
+
+            if timing {
+                eprintln!(
+                    "冷启动：打开工作区 {} ms，列表 {} ms",
+                    opened_at.as_millis(),
+                    listed_at.as_millis()
+                );
             }
 
             // 截图与交互检查要直接进画布；普通启动停在首页。
