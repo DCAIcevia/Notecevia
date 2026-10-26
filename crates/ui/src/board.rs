@@ -348,6 +348,19 @@ impl BoardApp {
         self.document != self.saved
     }
 
+    /// 相对保存快照，正文有新增或内容变化的块编号。
+    ///
+    /// 只比较正文：纯几何、层级、锁定/隐藏的变化不算，删除的块也不在这里
+    /// （那块正文已经不在文档里，由保存后的孤儿回收处理）。给增量保存用。
+    pub fn changed_bodies(&self) -> Vec<u64> {
+        self.document
+            .bodies
+            .iter()
+            .filter(|(id, body)| self.saved.bodies.get(*id) != Some(*body))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// 在顶栏右侧显示一条普通状态，几秒后自动消失。
     ///
     /// 传进来的如果是 `strings` 里那些失败文案（以 save_failed 之类开头），会被当作
@@ -528,6 +541,27 @@ impl BoardApp {
                 let y = start.y + (index / 24) as f32 * 55.0;
                 let id = document.add_text(Geometry::new(x, y, 62.0, 47.0));
                 document.text_mut(id).text = format!("块 {index}");
+            }
+        });
+    }
+
+    /// 开发检查用：给第一块文本末尾加一个字符，走正常的撤销与未保存路径。
+    ///
+    /// 没有文本块时什么都不做。用来手动验证增量保存是否只写这一块正文。
+    pub fn nudge_first_text(&mut self) {
+        let first = self
+            .document
+            .board
+            .entries
+            .iter()
+            .find(|entry| entry.kind == BlockKind::Text)
+            .map(|entry| entry.id);
+        let Some(id) = first else {
+            return;
+        };
+        self.edit(|document| {
+            if let Some(Body::Text(text)) = document.body_mut(id) {
+                text.text.push('x');
             }
         });
     }
@@ -2636,6 +2670,71 @@ mod tests {
         app.image_export_request = true;
         assert!(app.take_image_export_request());
         assert!(!app.take_image_export_request());
+    }
+
+    #[test]
+    fn changed_bodies_tracks_only_body_edits() {
+        let mut app = blank();
+        app.mark_saved();
+
+        let first = app.edit(|document| document.add_text(Geometry::new(0.0, 0.0, 100.0, 50.0)));
+        assert_eq!(app.changed_bodies(), vec![first]);
+        app.mark_saved();
+        assert!(app.changed_bodies().is_empty());
+
+        app.edit(|document| {
+            if let Some(Body::Text(text)) = document.body_mut(first) {
+                text.text = "改动".to_owned();
+            }
+        });
+        assert_eq!(app.changed_bodies(), vec![first]);
+        app.mark_saved();
+
+        // 只挪位置、改层级不算正文改动。
+        app.edit(|document| {
+            if let Some(entry) = document.entry_mut(first) {
+                entry.geometry.x += 40.0;
+                entry.z += 1;
+            }
+        });
+        assert!(app.changed_bodies().is_empty());
+        app.mark_saved();
+
+        let second = app.edit(|document| document.add_text(Geometry::new(200.0, 0.0, 100.0, 50.0)));
+        assert_eq!(app.changed_bodies(), vec![second]);
+        app.mark_saved();
+        assert!(app.changed_bodies().is_empty());
+
+        // 删除由保存后的孤儿回收处理，不在增量保存的正文集合里。
+        app.edit(|document| {
+            document.remove_block(second);
+        });
+        assert!(app.changed_bodies().is_empty());
+    }
+
+    #[test]
+    fn nudge_first_text_marks_dirty_and_can_be_undone() {
+        let mut document = Document::new("测试画板");
+        let id = document.add_text(Geometry::new(0.0, 0.0, 100.0, 50.0));
+        document.text_mut(id).text = "abc".to_owned();
+        let mut app = BoardApp::new(document, Box::new(()));
+        assert!(!app.is_dirty());
+
+        app.nudge_first_text();
+        assert!(app.is_dirty());
+        assert_eq!(app.document().text_of(id), "abcx");
+        assert_eq!(app.changed_bodies(), vec![id]);
+
+        app.undo();
+        assert_eq!(app.document().text_of(id), "abc");
+        assert!(!app.is_dirty());
+        assert!(app.changed_bodies().is_empty());
+
+        // 没有文本块时什么都不做。
+        let mut empty = blank();
+        empty.nudge_first_text();
+        assert!(!empty.is_dirty());
+        assert!(empty.changed_bodies().is_empty());
     }
 
     #[test]
