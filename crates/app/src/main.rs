@@ -12,7 +12,8 @@ use notecevia_core::{BlockKind, Document};
 use notecevia_store::Workspace;
 use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
 use notecevia_ui::media::MediaSource;
-use notecevia_ui::{BoardApp, strings};
+use notecevia_ui::shell::{MenuCommand, Shell};
+use notecevia_ui::{BoardApp, strings, theme};
 
 /// 自动保存的间隔，秒。改动一直在就按这个节奏落盘。
 const AUTOSAVE_SECONDS: f64 = 2.0;
@@ -35,6 +36,26 @@ impl MediaSource for DiskMedia {
         }
         std::fs::read(self.dir.join(hash)).ok()
     }
+
+    fn media_len(&self, hash: &str) -> Option<u64> {
+        if !is_hash(hash) {
+            return None;
+        }
+        std::fs::metadata(self.dir.join(hash))
+            .ok()
+            .map(|it| it.len())
+    }
+}
+
+/// 主题文件：放在工作区根目录的 theme.json。换配色与尺寸不用改代码。
+struct FileTheme {
+    path: PathBuf,
+}
+
+impl notecevia_ui::theme::ThemeSource for FileTheme {
+    fn theme_text(&self) -> Option<String> {
+        std::fs::read_to_string(&self.path).ok()
+    }
 }
 
 /// 首页要缩略图时才去读盘，不把一万张图塞进内存。
@@ -52,6 +73,8 @@ struct App {
     workspace: Option<Workspace>,
     home: HomeApp,
     board: Option<BoardApp>,
+    /// 外壳：顶栏、两条侧栏与资源栏的开合状态。
+    shell: Shell,
     /// 当前画板的编号，文件名就是它。
     board_id: u64,
     /// 旧文件打不开时关掉写盘，免得用空画板盖掉用户原来那份。
@@ -103,6 +126,7 @@ impl App {
             workspace: None,
             home: HomeApp::new(),
             board: None,
+            shell: Shell::new(),
             board_id: 1,
             can_save: false,
             last_autosave: 0.0,
@@ -173,7 +197,7 @@ impl App {
                 .set_boards(infos.into_iter().map(board_item).collect()),
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
             }
         }
     }
@@ -195,13 +219,21 @@ impl App {
             }
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
             }
         }
     }
 
-    /// 新建一张空画板并立刻落盘，这样首页列表马上能看到它。
+    /// 新建一张空笔记并立刻落盘，这样侧栏立刻能看到它。
+    ///
+    /// 已经开着一张没写过东西的空笔记时直接复用它：否则点几下「＋」就堆出一排空笔记。
     fn create_board(&mut self) {
+        if let Some(board) = &self.board
+            && is_blank_note(board)
+        {
+            self.status(strings::BOARD_ALREADY_EMPTY);
+            return;
+        }
         self.save();
         let next = match &self.workspace {
             Some(workspace) => workspace.next_board(),
@@ -221,11 +253,17 @@ impl App {
                 None => PathBuf::from("media"),
             },
         };
-        self.board = Some(BoardApp::new(Document::new("画板"), Box::new(media)));
+        self.board = Some(BoardApp::new(
+            Document::new(strings::UNTITLED_NOTE),
+            Box::new(media),
+        ));
         self.board_id = id;
         self.last_autosave = 0.0;
         self.last_thumbnail_at = f64::NEG_INFINITY;
         self.save();
+        // 侧栏一直挂在那儿，新建完得让列表立刻看见，否则会显示"还没有笔记"。
+        self.refresh_boards();
+        self.note_workspace_stamp();
         self.status(strings::BOARD_CREATED);
     }
 
@@ -260,7 +298,7 @@ impl App {
                     Ok(()) => self.home.set_status(strings::BOARD_DELETED),
                     Err(error) => {
                         let message = strings::open_failed(error);
-                        self.home.set_status(message);
+                        self.home.set_error(message);
                     }
                 }
                 self.refresh_boards();
@@ -296,7 +334,7 @@ impl App {
             Ok(_) => self.home.set_status(strings::REFRESHED),
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
             }
         }
         self.refresh_boards();
@@ -340,7 +378,7 @@ impl App {
             Ok(document) => document,
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
                 return;
             }
         };
@@ -353,7 +391,7 @@ impl App {
             Ok(()) => self.home.set_status(done),
             Err(error) => {
                 let message = strings::save_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
             }
         }
         self.refresh_boards();
@@ -373,7 +411,7 @@ impl App {
             Ok(hits) => hits,
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
                 return;
             }
         };
@@ -401,7 +439,7 @@ impl App {
         };
         let dir = workspace.root().join("exports");
         if let Err(error) = std::fs::create_dir_all(&dir) {
-            self.home.set_status(strings::export_failed(error));
+            self.home.set_error(strings::export_failed(error));
             return;
         }
         let title = workspace
@@ -426,7 +464,7 @@ impl App {
         };
         match result {
             Ok(()) => self.home.set_status(strings::exported(path.display())),
-            Err(error) => self.home.set_status(strings::export_failed(error)),
+            Err(error) => self.home.set_error(strings::export_failed(error)),
         }
     }
 
@@ -474,7 +512,7 @@ impl App {
             Ok(_) => self.home.set_status(strings::IMPORTED),
             Err(error) => {
                 let message = strings::open_failed(error);
-                self.home.set_status(message);
+                self.home.set_error(message);
             }
         }
         self.refresh_boards();
@@ -694,19 +732,85 @@ impl eframe::App for App {
         }
         self.collect_frame_stats(&ctx);
         self.take_capture_result();
+        let new_note_key =
+            ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N));
+        // 界不读时钟：这里把"现在"递进去，列表才好写"3 分钟前"。
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        self.home.set_now(now);
+        self.home
+            .set_current(self.board.as_ref().map(|_| self.board_id));
+        let mut fits_thumbnail = false;
         if self.board.is_some() {
             if std::mem::take(&mut self.restore_thumbnail_view)
                 && let Some(board) = self.board.as_mut()
             {
                 board.end_thumbnail_view();
             }
-            let fits_thumbnail = self.should_fit_thumbnail(&ctx);
+            fits_thumbnail = self.should_fit_thumbnail(&ctx);
             if fits_thumbnail && let Some(board) = self.board.as_mut() {
                 board.begin_thumbnail_view();
             }
-            if let Some(board) = self.board.as_mut() {
-                board.ui(ui);
+        }
+
+        let output = self.shell.ui(ui, &mut self.home, self.board.as_mut());
+        if output.new_note {
+            self.create_board();
+        }
+        // Ctrl N 只在这里处理一次。以前侧栏和画布各处理一遍，一次按键建两张。
+        if new_note_key && !output.new_note {
+            self.create_board();
+        }
+        match output.menu {
+            None => {}
+            Some(MenuCommand::NewNote) => self.create_board(),
+            Some(MenuCommand::CloseNote) => self.go_home(),
+            Some(MenuCommand::ExportHtml) => {
+                if self.board.is_some() {
+                    self.export(self.board_id, ExportKind::Html);
+                }
             }
+            Some(MenuCommand::ExportContainer) => {
+                if self.board.is_some() {
+                    self.export(self.board_id, ExportKind::Container);
+                }
+            }
+            Some(MenuCommand::Undo) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.undo_step();
+                }
+            }
+            Some(MenuCommand::Redo) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.redo_step();
+                }
+            }
+            Some(MenuCommand::DeleteSelection) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.delete_selection();
+                }
+            }
+            Some(MenuCommand::SelectAll) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.select_everything();
+                }
+            }
+            Some(MenuCommand::ClearSelection) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.clear_selection();
+                }
+            }
+            Some(MenuCommand::Quit) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Some(MenuCommand::About) => self.home.set_status(strings::about()),
+            // 这两个外壳已经自己处理完了。
+            Some(MenuCommand::ToggleList | MenuCommand::ToggleAssets) => {}
+        }
+        if let Some(action) = output.home {
+            self.handle_home_action(action);
+        }
+
+        if self.board.is_some() {
             if fits_thumbnail {
                 self.capture_thumbnail(&ctx);
             }
@@ -715,29 +819,16 @@ impl eframe::App for App {
             }
             self.autosave(&ctx);
             self.handle_image_export(&ctx);
-            if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N)) {
-                self.create_board();
-            }
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::H)) {
                 self.go_home();
             }
             self.open_media_request();
             self.handle_dropped_files(&ctx);
-            let home_requested = self
-                .board
-                .as_mut()
-                .is_some_and(|board| board.take_home_request());
-            if home_requested {
-                self.go_home();
-            }
         } else {
             self.handle_dropped_files(&ctx);
             self.watch_external_changes(&ctx);
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::R)) {
                 self.refresh_index();
-            }
-            if let Some(action) = self.home.ui(ui) {
-                self.handle_home_action(action);
             }
         }
 
@@ -774,10 +865,17 @@ impl eframe::App for App {
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        notecevia_ui::theme::palette(visuals.dark_mode)
-            .canvas
-            .to_normalized_gamma_f32()
+        let _ = visuals;
+        theme::chrome().window.to_normalized_gamma_f32()
     }
+}
+
+/// 一张没起名、也没放过任何块的笔记。
+fn is_blank_note(board: &BoardApp) -> bool {
+    let document = board.document();
+    document.board.title == strings::UNTITLED_NOTE
+        && document.board.entries.is_empty()
+        && !board.is_dirty()
 }
 
 fn board_item(info: notecevia_store::BoardInfo) -> BoardItem {
@@ -843,8 +941,13 @@ fn main() -> eframe::Result {
             if dark {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
-
             let root = notecevia_store::workspace_root();
+            let (theme, theme_warning) = theme::load(&FileTheme {
+                path: root.join("theme.json"),
+            });
+            let _ = theme::install(theme);
+            theme::apply(&cc.egui_ctx);
+
             let opened_at;
             let listed_at;
             let mut app = App::new(shot.clone());
@@ -874,8 +977,14 @@ fn main() -> eframe::Result {
                     opened_at = started.elapsed();
                     listed_at = opened_at;
                     let message = strings::workspace_failed(root.display(), error);
-                    app.home.set_status(message);
+                    app.home.set_error(message);
                 }
+            }
+
+            // 主题文件写错了要说出来，但界面照常起，用内置浅色。
+            if let Some(warning) = theme_warning {
+                eprintln!("主题文件读不了，改用内置浅色：{warning}");
+                app.home.set_error(warning);
             }
 
             if timing {
@@ -1034,6 +1143,14 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_untitled_empty_note_counts_as_blank() {
+        let named = BoardApp::new(Document::new(strings::UNTITLED_NOTE), Box::new(()));
+        assert!(is_blank_note(&named));
+        let titled = BoardApp::new(Document::new("周会记录"), Box::new(()));
+        assert!(!is_blank_note(&titled));
+    }
 
     #[test]
     fn slug_keeps_letters_and_collapses_punctuation() {

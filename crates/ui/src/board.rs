@@ -23,18 +23,18 @@ use crate::{chrome, strings, theme};
 /// 缩放范围。再小看不清，再大失去意义。
 const MIN_ZOOM: f32 = 0.15;
 const MAX_ZOOM: f32 = 6.0;
-/// 新建文字块的默认大小。
-const NEW_TEXT_WIDTH: f32 = 320.0;
+/// 新建文字块的高度；宽度按内容估算。
 const NEW_TEXT_HEIGHT: f32 = 60.0;
+/// 文字块自动变宽的换行上限：到了就换行，不再变宽。
+const MAX_TEXT_WIDTH: f32 = 480.0;
+/// 估算文字宽度时 ASCII 字符相对字号的占比；中日韩字符按整个字号算。
+const ASCII_WIDTH_RATIO: f32 = 0.55;
 const NEW_TABLE_SIZE: Vec2 = Vec2::new(320.0, 180.0);
 const NEW_SHAPE_SIZE: Vec2 = Vec2::new(160.0, 120.0);
 const NEW_HIGHLIGHT_SIZE: Vec2 = Vec2::new(200.0, 80.0);
 /// 视图复位后的状态。
 const DEFAULT_ORIGIN: Pos2 = Pos2::new(160.0, 140.0);
 const DEFAULT_ZOOM: f32 = 1.0;
-/// 普通状态提示停留多久（秒）。
-const STATUS_TTL: f64 = 3.0;
-
 /// 鼠标落在块上时要做的事。位置决定动作，不摆按钮。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Grab {
@@ -264,12 +264,17 @@ struct Marquee {
     additive: bool,
 }
 
-/// 一条状态。错误常驻到被下一条替换；普通状态几秒后自己消失。
+/// 一条状态。失败常驻到被下一条替换；其余状态只记下来，不在画布栏上占地方。
 struct Notice {
     text: String,
     error: bool,
-    /// 第一次显示的时间，由 `ui` 从 egui 的 input time 取，不引时钟。
-    born: Option<f64>,
+}
+
+/// 右侧资源栏的一行：名字、体积、种类。`bytes` 为 0 表示量不出来，界面不画大小。
+pub struct AssetRow {
+    pub name: String,
+    pub bytes: u64,
+    pub kind: BlockKind,
 }
 
 /// 画布界面。数据在 Document 里，这里只管怎么显示、怎么改。
@@ -285,6 +290,8 @@ pub struct BoardApp {
     /// 编辑框刚建好，下一帧把焦点交给它。
     request_focus: bool,
     selected: Vec<u64>,
+    /// 本会话新建、还没被手动拉过宽度的文字块：宽度跟着内容走。
+    auto_width: HashSet<u64>,
     drag: Option<DragState>,
     marquee: Option<Marquee>,
     /// 进入文字编辑前 / 新建文字块前的快照，结束时收成一步撤销。
@@ -296,11 +303,8 @@ pub struct BoardApp {
     status: Option<Notice>,
     /// 双击视频/音频块时记下哈希，等 app 取走去开系统播放器。
     media_request: Option<String>,
-    /// 顶栏点了「全部画板」，等 app 取走。
-    home_request: bool,
-    /// 顶栏点了「导出图片」，等 app 截完图取走。
+    /// 画布栏点了「导出图片」，等 app 截完图取走。
     image_export_request: bool,
-    fps: f32,
     /// 上一帧画布的面积，用来把新块放在视口中心。
     canvas: Rect,
     /// 为缩略图临时改成「缩到全貌」的视图时，这里存原来的视图。
@@ -319,6 +323,7 @@ impl BoardApp {
             editing: None,
             request_focus: false,
             selected: Vec::new(),
+            auto_width: HashSet::new(),
             drag: None,
             marquee: None,
             edit_before: None,
@@ -327,9 +332,7 @@ impl BoardApp {
             font_filter: String::new(),
             status: None,
             media_request: None,
-            home_request: false,
             image_export_request: false,
-            fps: 0.0,
             canvas: Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 760.0)),
             thumbnail_view: None,
         }
@@ -337,6 +340,28 @@ impl BoardApp {
 
     pub fn document(&self) -> &Document {
         &self.document
+    }
+
+    /// 当前文档里的媒体，按块的顺序。图片的体积向媒体来源要，量不出来记 0。
+    pub fn assets(&self) -> Vec<AssetRow> {
+        self.document
+            .board
+            .entries
+            .iter()
+            .filter_map(|entry| match self.document.body(entry.id)? {
+                Body::Image(image) => Some(AssetRow {
+                    name: image.name.clone(),
+                    bytes: self.media.media_len(&image.media).unwrap_or(0),
+                    kind: BlockKind::Image,
+                }),
+                Body::Media(media) => Some(AssetRow {
+                    name: media.name.clone(),
+                    bytes: media.bytes,
+                    kind: entry.kind,
+                }),
+                _ => None,
+            })
+            .collect()
     }
 
     /// 存过盘之后调用：把当前文档记成保存点，未保存标记随之消失。
@@ -361,18 +386,14 @@ impl BoardApp {
             .collect()
     }
 
-    /// 在顶栏右侧显示一条普通状态，几秒后自动消失。
+    /// 记一条状态。画布栏只显示失败，其余（已保存、已导出）静默。
     ///
     /// 传进来的如果是 `strings` 里那些失败文案（以 save_failed 之类开头），会被当作
-    /// 错误处理：错误优先于「未保存」，不会被盖掉。
+    /// 错误处理：错误常驻到被下一条替换。
     pub fn set_status(&mut self, status: impl Into<String>) {
         let text = status.into();
         let error = looks_like_error(&text);
-        self.status = Some(Notice {
-            text,
-            error,
-            born: None,
-        });
+        self.status = Some(Notice { text, error });
     }
 
     /// 明确记录一条错误。app 只用 set_status 也可以，这条是给语义清楚的调用方。
@@ -380,7 +401,6 @@ impl BoardApp {
         self.status = Some(Notice {
             text: error.into(),
             error: true,
-            born: None,
         });
     }
 
@@ -393,13 +413,13 @@ impl BoardApp {
         self.editing = None;
         self.request_focus = false;
         self.selected.clear();
+        self.auto_width.clear();
         self.drag = None;
         self.marquee = None;
         self.edit_before = None;
         self.images.clear();
         self.status = None;
         self.media_request = None;
-        self.home_request = false;
         self.image_export_request = false;
         self.thumbnail_view = None;
     }
@@ -444,13 +464,6 @@ impl BoardApp {
     /// 双击过视频/音频块时，app 在这里取走要打开的媒体哈希。
     pub fn take_media_request(&mut self) -> Option<String> {
         self.media_request.take()
-    }
-
-    /// 顶栏点过「全部画板」时返回 true，取走时清掉。
-    pub fn take_home_request(&mut self) -> bool {
-        let requested = self.home_request;
-        self.home_request = false;
-        requested
     }
 
     /// 顶栏点过「导出图片」时返回 true，取走时清掉。截图与保存由 app 做。
@@ -507,6 +520,41 @@ impl BoardApp {
     }
 
     /// 选中第一块，不进入编辑。给命令行验证操作条用。
+    /// 菜单用：撤销一步。
+    pub fn undo_step(&mut self) {
+        self.undo();
+    }
+
+    /// 菜单用：重做一步。
+    pub fn redo_step(&mut self) {
+        self.redo();
+    }
+
+    /// 菜单用：删掉选中的块。
+    pub fn delete_selection(&mut self) {
+        self.delete_selected();
+    }
+
+    /// 菜单用：选中全部块。
+    pub fn select_everything(&mut self) {
+        self.selected = self
+            .document
+            .board
+            .entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+    }
+
+    /// 菜单用：取消选择；正在写字就先收尾。
+    pub fn clear_selection(&mut self) {
+        if self.editing.is_some() {
+            self.commit_editing();
+        } else {
+            self.selected.clear();
+        }
+    }
+
     pub fn select_first(&mut self) {
         if let Some(entry) = self.document.board.entries.first() {
             self.selected = vec![entry.id];
@@ -569,15 +617,13 @@ impl BoardApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.visuals().dark_mode);
         let window = ui.max_rect();
-        let top = Rect::from_min_size(
+        let bar = Rect::from_min_size(
             window.min,
-            Vec2::new(window.width(), chrome::TOP_BAR_HEIGHT),
+            Vec2::new(window.width(), chrome::CANVAS_BAR_HEIGHT),
         );
-        let canvas = Rect::from_min_max(Pos2::new(window.min.x, top.max.y), window.max);
+        let canvas = Rect::from_min_max(Pos2::new(window.min.x, bar.max.y), window.max);
         self.canvas = canvas;
         let clip = ui.clip_rect().intersect(canvas);
-        let now = ui.input(|input| input.time);
-        self.touch_status(now);
 
         // 先登记背景，再登记块：后登记的在上，块会拿走落在它身上的点击。
         let background = ui.interact(
@@ -587,18 +633,21 @@ impl BoardApp {
         );
         self.handle_background(ui, &background, canvas);
         ui.painter()
-            .rect_filled(canvas, CornerRadius::ZERO, palette.canvas);
+            .rect_filled(canvas, CornerRadius::ZERO, theme::chrome().window);
 
-        let (state, error) = self.status_text(now);
-        let top_output =
-            chrome::top_bar(ui, &palette, top, &self.document.board.title, &state, error);
-        if top_output.home {
-            self.home_request = true;
-        }
-        if top_output.export_image {
+        let (state, error) = self.status_text();
+        let bar_output = chrome::canvas_bar(
+            ui,
+            bar,
+            &self.document.board.title,
+            self.view.zoom,
+            &state,
+            error,
+        );
+        if bar_output.export_image {
             self.image_export_request = true;
         }
-        if let Some(kind) = top_output.new_kind {
+        if let Some(kind) = bar_output.new_kind {
             self.insert_new(kind);
         }
 
@@ -611,52 +660,21 @@ impl BoardApp {
         self.edit_text(ui, &palette);
         self.edit_table(ui, &palette);
         self.selection_toolbar(ui, &palette, canvas);
-        self.schedule_status_repaint(ui, now);
     }
 
     // ---- 状态 ----
 
-    fn touch_status(&mut self, now: f64) {
-        if let Some(notice) = &mut self.status
-            && !notice.error
-            && notice.born.is_none()
-        {
-            notice.born = Some(now);
-        }
-    }
-
-    fn status_text(&self, now: f64) -> (String, bool) {
-        // 优先级：错误 > 未保存 > 普通状态。保存失败的提示不能被「未保存」盖掉。
-        if let Some(notice) = &self.status
-            && notice.error
-        {
-            return (notice.text.clone(), true);
-        }
-        if self.is_dirty() {
-            return (strings::UNSAVED.to_owned(), false);
-        }
-        if let Some(notice) = &self.status
-            && notice.born.is_none_or(|born| now - born < STATUS_TTL)
-        {
-            return (notice.text.clone(), false);
-        }
-        (String::new(), false)
-    }
-
-    fn schedule_status_repaint(&self, ui: &egui::Ui, now: f64) {
+    /// 画布栏上的状态。只有失败出字并且常驻；成功与「改过了」都不出字。
+    ///
+    /// 保存是同步写盘，同一帧就有结果，不存在能看见的「保存中」。
+    fn status_text(&self) -> (String, bool) {
         let Some(notice) = &self.status else {
-            return;
+            return (String::new(), false);
         };
         if notice.error {
-            return;
+            return (notice.text.clone(), true);
         }
-        if let Some(born) = notice.born {
-            let left = STATUS_TTL - (now - born);
-            if left > 0.0 {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_secs_f64(left));
-            }
-        }
+        (String::new(), false)
     }
 
     // ---- 输入 ----
@@ -959,6 +977,10 @@ impl BoardApp {
             }
             Grab::Move => {}
         }
+        // 手动拉过宽度之后，这块不再跟着内容改宽。
+        if matches!(grab, Grab::Horizontal { .. } | Grab::Corner { .. }) {
+            self.auto_width.remove(&id);
+        }
     }
 
     fn begin_block_edit(&mut self, id: u64, kind: BlockKind, pointer: Option<Pos2>) {
@@ -990,9 +1012,10 @@ impl BoardApp {
     fn begin_new_text(&mut self, world: Pos2) {
         let before = self.document.clone();
         let z = self.document.max_z() + 1;
+        let width = text_block_width("", theme::BLOCK_FONT);
         let id = self.document.add_block(
             BlockKind::Text,
-            Geometry::new(world.x, world.y, NEW_TEXT_WIDTH, NEW_TEXT_HEIGHT),
+            Geometry::new(world.x, world.y, width, NEW_TEXT_HEIGHT),
         );
         if let Some(entry) = self.document.entry_mut(id) {
             entry.z = z;
@@ -1001,6 +1024,7 @@ impl BoardApp {
         self.edit_before = Some(before);
         self.request_focus = true;
         self.selected.clear();
+        self.auto_width.insert(id);
     }
 
     fn begin_table_edit(&mut self, id: u64, pointer: Option<Pos2>) {
@@ -1179,7 +1203,8 @@ impl BoardApp {
         let centre = self.view.to_world(self.canvas.center());
         match kind {
             BlockKind::Text => {
-                let world = centre - Vec2::new(NEW_TEXT_WIDTH, NEW_TEXT_HEIGHT) / 2.0;
+                let width = text_block_width("", theme::BLOCK_FONT);
+                let world = centre - Vec2::new(width, NEW_TEXT_HEIGHT) / 2.0;
                 self.begin_new_text(world);
             }
             BlockKind::Table => self.insert_block(BlockKind::Table, NEW_TABLE_SIZE, centre),
@@ -1260,7 +1285,6 @@ impl BoardApp {
             return;
         }
         match command {
-            chrome::Command::Delete => self.delete_selected(),
             chrome::Command::Duplicate => self.duplicate_selected(),
             chrome::Command::StepTextSize(step) => {
                 self.edit(|document| {
@@ -1474,9 +1498,11 @@ impl BoardApp {
             (text.size.unwrap_or(theme::BLOCK_FONT) * zoom).max(4.0),
             self.family_of(text),
         );
-        let galley = painter.layout(text.text.clone(), font, colour, screen.width().max(1.0));
+        // 左右留出内边距，排版宽度和宽度估算用同一个值，换行点才对得上。
+        let text_rect = text_area(screen);
+        let galley = painter.layout(text.text.clone(), font, colour, text_rect.width().max(1.0));
         painter.add(rotated_text(
-            screen.min,
+            text_rect.min,
             galley,
             colour,
             rotation,
@@ -1752,53 +1778,26 @@ impl BoardApp {
         );
     }
 
-    fn paint_hud(&mut self, ui: &egui::Ui, palette: &theme::Palette, rect: Rect) {
-        let dt = ui.input(|input| input.stable_dt).max(1.0e-4);
-        let instant = 1.0 / dt;
-        self.fps = if self.fps == 0.0 {
-            instant
-        } else {
-            self.fps * 0.9 + instant * 0.1
-        };
-
-        let painter = ui.painter();
-        if self.document.board.entries.is_empty() {
-            let centre = rect.center();
-            painter.text(
-                centre - Vec2::new(0.0, 10.0),
-                Align2::CENTER_CENTER,
-                strings::EMPTY_BOARD,
-                FontId::proportional(theme::BLOCK_FONT),
-                palette.muted,
-            );
-            painter.text(
-                centre + Vec2::new(0.0, 12.0),
-                Align2::CENTER_CENTER,
-                strings::EMPTY_BOARD_HINT,
-                FontId::proportional(theme::SMALL_FONT),
-                palette.muted,
-            );
+    /// 空画板只在正中偏上留一句下一步和它的一行说明，别的一概不画。
+    fn paint_hud(&self, ui: &egui::Ui, palette: &theme::Palette, rect: Rect) {
+        if !self.document.board.entries.is_empty() {
+            return;
         }
-
-        let font = FontId::proportional(theme::SMALL_FONT);
-        let hovered_files = ui.input(|input| !input.raw.hovered_files.is_empty());
-        let hint = if hovered_files {
-            strings::INSERT_MEDIA_HINT
-        } else {
-            strings::BOARD_HINT
-        };
-        let bottom = rect.left_bottom() + Vec2::new(theme::HINT_INSET, -theme::HINT_INSET);
-        paint_chip(painter, bottom, Align2::LEFT_BOTTOM, hint, &font, palette);
-
-        let right = format!("{:.0}%   {:.0} fps", self.view.zoom * 100.0, self.fps);
-        let anchor = rect.right_bottom() + Vec2::new(-theme::HINT_INSET, -theme::HINT_INSET);
-        paint_chip(
-            painter,
-            anchor,
-            Align2::RIGHT_BOTTOM,
-            &right,
-            &font,
-            palette,
+        let painter = ui.painter();
+        let anchor = rect.center() - Vec2::new(0.0, theme::ui().gap_l);
+        painter.text(
+            anchor - Vec2::new(0.0, theme::ui().gap_m),
+            Align2::CENTER_CENTER,
+            strings::EMPTY_BOARD,
+            FontId::proportional(theme::ui().empty),
+            palette.muted,
+        );
+        painter.text(
+            anchor + Vec2::new(0.0, theme::ui().gap_m),
+            Align2::CENTER_CENTER,
+            strings::EMPTY_BOARD_HINT,
+            FontId::proportional(theme::SMALL_FONT),
+            palette.muted,
         );
     }
 
@@ -1807,17 +1806,31 @@ impl BoardApp {
             return;
         };
         let id = *id;
+        let Some(size) = self.document.body(id).and_then(|body| match body {
+            Body::Text(text) => Some(text.size.unwrap_or(theme::BLOCK_FONT)),
+            _ => None,
+        }) else {
+            self.editing = None;
+            return;
+        };
+        // 边打字边随内容变宽：手动拉过宽度的块尊重手动，不再自动改。
+        if self.auto_width.contains(&id) {
+            let width = text_block_width(self.document.text_of(id), size);
+            if let Some(entry) = self.document.entry_mut(id) {
+                entry.geometry.width = width;
+            }
+        }
         let Some(entry) = self.document.entry(id).cloned() else {
             self.editing = None;
             return;
         };
         let zoom = self.view.zoom;
         let screen = self.view.rect_to_screen(rect_of(entry.geometry));
+        let text_rect = text_area(screen);
         let Some(Body::Text(text)) = self.document.body(id) else {
             self.editing = None;
             return;
         };
-        let size = text.size.unwrap_or(theme::BLOCK_FONT);
         let family = self.family_of(text);
         let colour = chrome::text_colour(text, palette);
         let background = text
@@ -1837,9 +1850,9 @@ impl BoardApp {
                 .background_color(background)
                 .margin(egui::Margin::ZERO)
                 .frame(egui::Frame::NONE)
-                .desired_width(screen.width())
+                .desired_width(text_rect.width())
                 .desired_rows(1);
-            ui.put(screen, editor)
+            ui.put(text_rect, editor)
         };
 
         // 焦点要等编辑框建好之后再要：它建起来时会因为「这次点击落在框外」而放弃焦点，
@@ -1856,7 +1869,7 @@ impl BoardApp {
             };
             let galley =
                 ui.painter()
-                    .layout(text.text.clone(), font, colour, screen.width().max(1.0));
+                    .layout(text.text.clone(), font, colour, text_rect.width().max(1.0));
             galley.size().y.max(theme::MIN_BLOCK_HEIGHT)
         };
         if let Some(entry) = self.document.entry_mut(id)
@@ -2144,28 +2157,6 @@ fn table_cell_rect(screen: Rect, rows: u16, cols: u16, row: u16, column: u16) ->
     )
 }
 
-/// 画一条底部提示。叠在内容上时先铺一层画布底色，否则字和块糊在一起。
-fn paint_chip(
-    painter: &egui::Painter,
-    anchor: Pos2,
-    align: Align2,
-    text: &str,
-    font: &FontId,
-    palette: &theme::Palette,
-) {
-    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), palette.muted);
-    let rect = align.anchor_size(anchor, galley.size());
-    let [r, g, b, _] = palette.canvas.to_srgba_unmultiplied();
-    let backdrop = Color32::from_rgba_unmultiplied(r, g, b, 224);
-    let padding = Vec2::new(theme::HINT_PAD, theme::HINT_PAD / 2.0);
-    painter.rect_filled(
-        rect.expand2(padding),
-        CornerRadius::same((theme::BLOCK_RADIUS * 0.5).round() as u8),
-        backdrop,
-    );
-    painter.galley(rect.min, galley, palette.muted);
-}
-
 /// 虚线框。确认过的块才有，没有填充，只标边界。
 fn dashed_outline(painter: &egui::Painter, rect: Rect, rotation: f32, stroke: Stroke, zoom: f32) {
     let rect = rect.shrink(stroke.width / 2.0);
@@ -2218,6 +2209,53 @@ fn rotated_text(
 /// 旋转之后的包围盒，用来摆浮动的操作条。
 fn rotated_bounds(rect: Rect, rotation: f32) -> Rect {
     Rect::from_points(&rotated_corners(rect, rotation))
+}
+
+/// 文字块的左右内边距。宽度估算与排版共用同一个值。
+fn text_padding() -> f32 {
+    theme::ui().gap_m
+}
+
+/// 中日韩、假名、全角符号按整个字号排。按码位判断，不依赖具体字体表。
+fn is_wide_character(character: char) -> bool {
+    character as u32 >= 0x2E80
+}
+
+/// 一个字大约占多宽：宽字一个字号，其余按 ASCII 的比例。
+fn character_width(character: char, size: f32) -> f32 {
+    if is_wide_character(character) {
+        size
+    } else {
+        size * ASCII_WIDTH_RATIO
+    }
+}
+
+/// 一行文字的估算宽度。
+fn line_width(line: &str, size: f32) -> f32 {
+    line.chars()
+        .map(|character| character_width(character, size))
+        .sum()
+}
+
+/// 文字块按内容需要的宽度：最宽的一行加左右内边距，夹在最小宽度与换行上限之间。
+fn text_block_width(text: &str, size: f32) -> f32 {
+    let content = text
+        .lines()
+        .map(|line| line_width(line, size))
+        .fold(0.0, f32::max);
+    (content + text_padding() * 2.0).clamp(theme::MIN_BLOCK_WIDTH, MAX_TEXT_WIDTH)
+}
+
+/// 文字块里真正能排字的区域：左右各让出内边距。
+fn text_area(screen: Rect) -> Rect {
+    let pad = text_padding();
+    Rect::from_min_max(
+        Pos2::new(screen.left() + pad, screen.top()),
+        Pos2::new(
+            (screen.right() - pad).max(screen.left() + pad + 1.0),
+            screen.bottom(),
+        ),
+    )
 }
 
 fn rect_of(geometry: Geometry) -> Rect {
@@ -2509,6 +2547,70 @@ mod tests {
     }
 
     #[test]
+    fn two_characters_make_a_narrow_block() {
+        let width = text_block_width("你好", theme::BLOCK_FONT);
+        assert!(width < 200.0, "两个字不该撑到 {width}");
+        assert!(
+            width >= theme::MIN_BLOCK_WIDTH,
+            "宽度不该小于块的最小宽度：{width}"
+        );
+    }
+
+    #[test]
+    fn a_long_line_stops_at_the_wrap_limit() {
+        let width = text_block_width(&"字".repeat(200), theme::BLOCK_FONT);
+        assert!(
+            (width - MAX_TEXT_WIDTH).abs() < 0.01,
+            "长文本应该停在 {MAX_TEXT_WIDTH}，实际 {width}"
+        );
+    }
+
+    #[test]
+    fn a_manually_resized_block_stops_growing_with_its_text() {
+        let ctx = egui::Context::default();
+        let mut app = blank();
+        double_click(&ctx, &mut app, Pos2::new(400.0, 300.0), 0.0);
+        frame(
+            &ctx,
+            &mut app,
+            0.20,
+            vec![egui::Event::Text("你好".to_owned())],
+        );
+        click_elsewhere(&ctx, &mut app, Pos2::new(1000.0, 700.0));
+
+        let id = 1;
+        let screen = app
+            .view
+            .rect_to_screen(rect_of(app.document().entry(id).expect("块还在").geometry));
+        let edge = Pos2::new(screen.right(), screen.center().y);
+        drag(&ctx, &mut app, edge, edge + Vec2::new(100.0, 0.0), 0.40);
+        let resized = app.document().entry(id).expect("块还在").geometry.width;
+        assert!(resized > 100.0, "手动拉宽没生效：{resized}");
+        assert!(
+            !app.auto_width.contains(&id),
+            "手动拉过宽度之后不该再自动改宽"
+        );
+
+        // 再双击进去打字，宽度保持手动拉出来的值。
+        let centre = app
+            .view
+            .rect_to_screen(rect_of(app.document().entry(id).expect("块还在").geometry))
+            .center();
+        double_click(&ctx, &mut app, centre, 0.60);
+        frame(
+            &ctx,
+            &mut app,
+            0.80,
+            vec![egui::Event::Text("很长很长的一段文字".to_owned())],
+        );
+        let after = app.document().entry(id).expect("块还在").geometry.width;
+        assert!(
+            (after - resized).abs() < 0.5,
+            "打字以后宽度变了：{resized} -> {after}"
+        );
+    }
+
+    #[test]
     fn typing_and_committing_is_one_undo_step() {
         let ctx = egui::Context::default();
         let mut app = blank();
@@ -2618,26 +2720,77 @@ mod tests {
     }
 
     #[test]
-    fn error_status_beats_unsaved_and_normal_status_expires() {
+    fn only_failures_show_in_the_canvas_bar() {
         let mut app = blank();
         app.edit(|document| {
             document.add_text(Geometry::new(0.0, 0.0, 10.0, 10.0));
         });
         assert!(app.is_dirty());
 
-        app.set_status("普通提示");
-        assert_eq!(app.status_text(0.0).0, strings::UNSAVED);
+        // 改过了不出字，保存成功也不出字：保存状态不常驻。
+        assert_eq!(app.status_text(), (String::new(), false));
+        app.set_status(strings::SAVED);
+        assert_eq!(app.status_text(), (String::new(), false));
 
+        // 失败出字，而且不会自己消失。
         app.set_error(strings::save_failed("磁盘满了"));
-        let (text, error) = app.status_text(0.0);
+        let (text, error) = app.status_text();
         assert!(error);
         assert_eq!(text, strings::save_failed("磁盘满了"));
-
         app.mark_saved();
-        app.set_status(strings::SAVED);
-        app.status.as_mut().expect("刚设过状态").born = Some(10.0);
-        assert_eq!(app.status_text(10.5).0, strings::SAVED);
-        assert_eq!(app.status_text(14.0).0, "");
+        assert_eq!(app.status_text(), (strings::save_failed("磁盘满了"), true));
+    }
+
+    struct Sizes;
+
+    impl MediaSource for Sizes {
+        fn media(&self, _hash: &str) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn media_len(&self, hash: &str) -> Option<u64> {
+            (hash == "photo").then_some(2048)
+        }
+    }
+
+    #[test]
+    fn assets_lists_media_in_block_order() {
+        let mut app = BoardApp::new(Document::new("测试画板"), Box::new(Sizes));
+        assert!(app.assets().is_empty());
+
+        app.insert_media(
+            BlockKind::Image,
+            "photo".to_owned(),
+            "海边.png".to_owned(),
+            0,
+        );
+        app.insert_media(
+            BlockKind::Audio,
+            "clip".to_owned(),
+            "录音.m4a".to_owned(),
+            4096,
+        );
+        // 量不出体积的图片记 0，界面不画大小；文字块不是资源。
+        app.insert_media(
+            BlockKind::Image,
+            "gone".to_owned(),
+            "找不到.png".to_owned(),
+            0,
+        );
+        app.edit(|document| {
+            document.add_text(Geometry::new(0.0, 0.0, 10.0, 10.0));
+        });
+
+        let assets = app.assets();
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[0].name, "海边.png");
+        assert_eq!(assets[0].bytes, 2048);
+        assert_eq!(assets[0].kind, BlockKind::Image);
+        assert_eq!(assets[1].name, "录音.m4a");
+        assert_eq!(assets[1].bytes, 4096);
+        assert_eq!(assets[1].kind, BlockKind::Audio);
+        assert_eq!(assets[2].name, "找不到.png");
+        assert_eq!(assets[2].bytes, 0);
     }
 
     #[test]
@@ -2655,16 +2808,16 @@ mod tests {
     }
 
     #[test]
-    fn canvas_rect_excludes_the_top_bar() {
+    fn canvas_rect_starts_below_the_canvas_bar() {
         let ctx = egui::Context::default();
         let mut app = blank();
         frame(&ctx, &mut app, 0.0, Vec::new());
 
         let canvas = app.canvas_rect();
         assert!((canvas.left()).abs() < 0.001);
-        assert!((canvas.top() - chrome::TOP_BAR_HEIGHT).abs() < 0.001);
+        assert!((canvas.top() - chrome::CANVAS_BAR_HEIGHT).abs() < 0.001);
         assert!((canvas.width() - 1280.0).abs() < 0.001);
-        assert!((canvas.height() - (760.0 - chrome::TOP_BAR_HEIGHT)).abs() < 0.001);
+        assert!((canvas.height() - (760.0 - chrome::CANVAS_BAR_HEIGHT)).abs() < 0.001);
 
         assert!(!app.take_image_export_request());
         app.image_export_request = true;
