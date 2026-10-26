@@ -196,6 +196,7 @@ fn cursor_for(grab: Option<Grab>, locked: bool) -> egui::CursorIcon {
 }
 
 /// 视口：世界坐标与屏幕坐标之间的换算。
+#[derive(Clone, Copy)]
 struct View {
     /// 世界原点落在屏幕上的位置。
     origin: Pos2,
@@ -210,17 +211,31 @@ impl View {
         }
     }
 
-    fn to_screen(&self, point: Pos2) -> Pos2 {
+    fn to_screen(self, point: Pos2) -> Pos2 {
         self.origin + point.to_vec2() * self.zoom
     }
 
-    fn to_world(&self, point: Pos2) -> Pos2 {
+    fn to_world(self, point: Pos2) -> Pos2 {
         ((point - self.origin) / self.zoom).to_pos2()
     }
 
-    fn rect_to_screen(&self, rect: Rect) -> Rect {
+    fn rect_to_screen(self, rect: Rect) -> Rect {
         Rect::from_min_max(self.to_screen(rect.min), self.to_screen(rect.max))
     }
+}
+
+/// 把一块世界矩形放进画布：四周留边，缩放夹在允许范围内。
+fn fit_view(bounds: Rect, canvas: Rect) -> View {
+    const PADDING: f32 = 32.0;
+    let width = bounds.width().max(1.0);
+    let height = bounds.height().max(1.0);
+    let available_x = (canvas.width() - PADDING * 2.0).max(1.0);
+    let available_y = (canvas.height() - PADDING * 2.0).max(1.0);
+    let zoom = (available_x / width)
+        .min(available_y / height)
+        .clamp(MIN_ZOOM, MAX_ZOOM);
+    let origin = canvas.center() - bounds.center().to_vec2() * zoom;
+    View { origin, zoom }
 }
 
 /// 正在编辑的东西。表格和文字一样是就地编辑，但表格多一个当前单元格。
@@ -288,6 +303,8 @@ pub struct BoardApp {
     fps: f32,
     /// 上一帧画布的面积，用来把新块放在视口中心。
     canvas: Rect,
+    /// 为缩略图临时改成「缩到全貌」的视图时，这里存原来的视图。
+    thumbnail_view: Option<View>,
 }
 
 impl BoardApp {
@@ -314,6 +331,7 @@ impl BoardApp {
             image_export_request: false,
             fps: 0.0,
             canvas: Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 760.0)),
+            thumbnail_view: None,
         }
     }
 
@@ -370,6 +388,7 @@ impl BoardApp {
         self.media_request = None;
         self.home_request = false;
         self.image_export_request = false;
+        self.thumbnail_view = None;
     }
 
     /// 拖入一份媒体：按视口中心放一块，返回时这一块已被选中。
@@ -431,6 +450,47 @@ impl BoardApp {
     /// 最近一帧画布区域在屏幕坐标里的矩形（不含顶栏），app 用它裁剪截图。
     pub fn canvas_rect(&self) -> egui::Rect {
         self.canvas
+    }
+
+    /// 为缩略图把视图缩到内容全貌。返回是否真的改了视图（没有可见块时不动）。
+    /// 调用之后要再画一帧让 app 截图，然后调 `end_thumbnail_view` 还原。
+    pub fn begin_thumbnail_view(&mut self) -> bool {
+        if self.thumbnail_view.is_some() {
+            return false;
+        }
+        let Some(bounds) = self.content_bounds() else {
+            return false;
+        };
+        self.thumbnail_view = Some(self.view);
+        self.view = fit_view(bounds, self.canvas);
+        true
+    }
+
+    /// 把缩略图那次临时缩放的视图还原。
+    pub fn end_thumbnail_view(&mut self) {
+        if let Some(view) = self.thumbnail_view.take() {
+            self.view = view;
+        }
+    }
+
+    /// 所有可见块合起来的外接矩形，世界坐标。
+    fn content_bounds(&self) -> Option<Rect> {
+        let mut bounds: Option<Rect> = None;
+        for entry in &self.document.board.entries {
+            if !entry.visible {
+                continue;
+            }
+            let geometry = entry.geometry;
+            let rect = Rect::from_min_size(
+                Pos2::new(geometry.x, geometry.y),
+                Vec2::new(geometry.width, geometry.height),
+            );
+            bounds = Some(match bounds {
+                None => rect,
+                Some(previous) => previous.union(rect),
+            });
+        }
+        bounds
     }
 
     /// 选中第一块，不进入编辑。给命令行验证操作条用。
@@ -2745,5 +2805,32 @@ mod tests {
         let geometry = Geometry::new(10.0, 20.0, 30.0, 40.0);
         let moved = Geometry::new(geometry.x + 5.0, geometry.y - 5.0, 30.0, 40.0);
         assert_eq!(moved, Geometry::new(15.0, 15.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn thumbnail_view_fits_content_then_restores() {
+        let mut app = blank();
+        app.canvas = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        app.document.add_text(Geometry::new(0.0, 0.0, 100.0, 50.0));
+        app.document
+            .add_text(Geometry::new(2000.0, 1500.0, 100.0, 50.0));
+        let before = app.view;
+
+        assert!(app.begin_thumbnail_view());
+        assert!(app.view.zoom < before.zoom);
+        let bounds = app.content_bounds().expect("两块内容");
+        assert!(app.canvas.contains_rect(app.view.rect_to_screen(bounds)));
+
+        app.end_thumbnail_view();
+        assert!((app.view.zoom - before.zoom).abs() < f32::EPSILON);
+        assert!((app.view.origin - before.origin).length() < 0.001);
+    }
+
+    #[test]
+    fn thumbnail_view_does_nothing_on_an_empty_board() {
+        let mut app = blank();
+        let before = app.view;
+        assert!(!app.begin_thumbnail_view());
+        assert!((app.view.zoom - before.zoom).abs() < f32::EPSILON);
     }
 }
