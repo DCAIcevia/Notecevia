@@ -231,3 +231,10 @@ pub const MENU_ABOUT: &str = "关于 Notecevia";
 pub fn about() -> String {
     format!("Notecevia {}", crate::version())
 }
+
+/// 左侧栏的三种视图。
+pub const SHELL_VIEW_PAGE: &str = "页";
+pub const SHELL_VIEW_VOLUME: &str = "册";
+pub const SHELL_VIEW_SHELF: &str = "书架";
+/// 还没做的东西，悬停时说清楚，别让人以为点了没反应是坏了。
+pub const SHELL_NOT_YET: &str = "还没做";

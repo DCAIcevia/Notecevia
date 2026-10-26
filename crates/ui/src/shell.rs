@@ -25,7 +25,7 @@ pub const ASSETS_WIDTH: f32 = 280.0;
 const RAIL_BUTTON: f32 = 32.0;
 const RAIL_RADIUS: u8 = 8;
 /// 顶栏里搜索框的宽。
-const SEARCH_WIDTH: f32 = 280.0;
+const SEARCH_WIDTH: f32 = 340.0;
 /// 资源栏里一行的行高。
 const ASSET_ROW: f32 = 30.0;
 
@@ -47,6 +47,16 @@ pub enum MenuCommand {
     About,
 }
 
+/// 左侧栏的三层视图：一篇笔记 / 一组笔记 / 所有组。
+///
+/// 现在只有「页」有数据；「册」与「书架」是分类管理，等模型定了再接上。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewMode {
+    Page,
+    Volume,
+    Shelf,
+}
+
 /// 外壳画完之后交回给调用方的东西。
 #[derive(Default)]
 pub struct ShellOutput {
@@ -64,6 +74,7 @@ pub struct Shell {
     last_query: String,
     list_open: bool,
     assets_open: bool,
+    view: ViewMode,
 }
 
 impl Default for Shell {
@@ -79,6 +90,7 @@ impl Shell {
             last_query: String::new(),
             list_open: true,
             assets_open: true,
+            view: ViewMode::Page,
         }
     }
 
@@ -114,31 +126,41 @@ impl Shell {
 
         let body = Rect::from_min_max(egui::pos2(full.min.x, top.max.y), full.max);
 
-        // 左侧栏：一条图标条，本轮只有「笔记」一项。
+        // 左侧栏：三层视图排一列。册与书架还没有数据，画淡、点了只说明。
         let rail = Rect::from_min_size(body.min, Vec2::new(RAIL_WIDTH, body.height()));
         painter.rect_filled(rail, CornerRadius::ZERO, theme::chrome().rail);
         painter.line_segment(
             [rail.right_top(), rail.right_bottom()],
             Stroke::new(1.0, theme::chrome().line_soft),
         );
-        let note_button = Rect::from_center_size(
-            egui::pos2(
-                rail.center().x,
-                rail.min.y + theme::ui().gap_m + RAIL_BUTTON / 2.0,
+        let entries = [
+            (ViewMode::Page, Icon::Page, strings::SHELL_VIEW_PAGE, true),
+            (
+                ViewMode::Volume,
+                Icon::Volume,
+                strings::SHELL_VIEW_VOLUME,
+                false,
             ),
-            Vec2::splat(RAIL_BUTTON),
-        );
-        painter.rect_filled(
-            note_button,
-            CornerRadius::same(RAIL_RADIUS),
-            theme::chrome().pressed,
-        );
-        icons::draw(
-            &painter,
-            note_button.shrink(RAIL_BUTTON * 0.25),
-            Icon::Doc,
-            theme::chrome().text,
-        );
+            (
+                ViewMode::Shelf,
+                Icon::Shelf,
+                strings::SHELL_VIEW_SHELF,
+                false,
+            ),
+        ];
+        for (index, (mode, icon, label, ready)) in entries.into_iter().enumerate() {
+            let rect = Rect::from_center_size(
+                egui::pos2(
+                    rail.center().x,
+                    rail.min.y
+                        + theme::ui().gap_m
+                        + RAIL_BUTTON / 2.0
+                        + index as f32 * (RAIL_BUTTON + 2.0),
+                ),
+                Vec2::splat(RAIL_BUTTON),
+            );
+            self.rail_button(ui, rect, icon, label, self.view == mode, ready);
+        }
 
         // 左侧边栏：笔记列表，由 HomeApp 画内容。
         let mut main_left = rail.max.x;
@@ -196,24 +218,21 @@ impl Shell {
     fn top_bar(&mut self, ui: &mut Ui, rect: Rect, has_note: bool, output: &mut ShellOutput) {
         let painter = ui.painter().clone();
         let center = rect.center().y;
-        let mut left = rect.min.x + theme::ui().gap_m + 2.0;
+        let control = theme::ui().control_height;
+        let inset = theme::ui().gap_m;
 
-        let toggle = Rect::from_min_size(
-            egui::pos2(left, center - theme::ui().control_height / 2.0),
-            Vec2::splat(theme::ui().control_height),
+        // 左右两个折叠键同尺寸、同贴边距离，顶栏才不歪。
+        let toggle = Rect::from_center_size(
+            egui::pos2(rect.min.x + inset + control / 2.0, center),
+            Vec2::splat(control),
         );
         if self.icon_button(ui, toggle, Icon::PanelLeft, strings::SHELL_TOGGLE_LIST) {
             self.list_open = !self.list_open;
         }
-        left = toggle.max.x + theme::ui().gap_m;
 
-        let right = rect.max.x - theme::ui().gap_m - 2.0;
-        let toggle_assets = Rect::from_min_size(
-            egui::pos2(
-                right - theme::ui().control_height,
-                center - theme::ui().control_height / 2.0,
-            ),
-            Vec2::splat(theme::ui().control_height),
+        let toggle_assets = Rect::from_center_size(
+            egui::pos2(rect.max.x - inset - control / 2.0, center),
+            Vec2::splat(control),
         );
         if self.icon_button(
             ui,
@@ -224,18 +243,17 @@ impl Shell {
             self.assets_open = !self.assets_open;
         }
 
-        let field = Rect::from_min_size(
-            egui::pos2(
-                toggle_assets.min.x - theme::ui().gap_m - SEARCH_WIDTH,
-                center - theme::ui().control_height / 2.0,
-            ),
-            Vec2::new(SEARCH_WIDTH, theme::ui().control_height),
+        // 搜索框按窗口中线摆，不按剩下的空隙摆，窗口拉宽拉窄都不会跑偏。
+        let field_width = (rect.width() * 0.3).clamp(220.0, SEARCH_WIDTH);
+        let field = Rect::from_center_size(
+            egui::pos2(rect.center().x, center),
+            Vec2::new(field_width, control),
         );
 
-        // 菜单栏占中间那段，老派的一条。
+        // 菜单栏占左边剩下的那段，老派的一条。
         let menus = Rect::from_min_max(
-            egui::pos2(left, rect.min.y + 4.0),
-            egui::pos2(field.min.x - theme::ui().gap_m, rect.max.y - 4.0),
+            egui::pos2(toggle.max.x + theme::ui().gap_l, rect.min.y + 4.0),
+            egui::pos2(field.min.x - theme::ui().gap_l, rect.max.y - 4.0),
         );
         self.menu_bar(ui, menus, has_note, output);
         painter.rect_filled(
@@ -282,6 +300,8 @@ impl Shell {
     /// 菜单栏：文件 / 编辑 / 选择 / 视图 / 帮助。一条老派的栏。
     fn menu_bar(&self, ui: &mut Ui, rect: Rect, has_note: bool, output: &mut ShellOutput) {
         ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+            // 菜单项之间拉开一点，别挤成一坨字。
+            ui.spacing_mut().item_spacing.x = theme::ui().gap_l;
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(strings::MENU_FILE, |ui| {
                     if menu_item(ui, strings::MENU_NEW_NOTE, &shortcut("N"), true) {
@@ -431,6 +451,43 @@ impl Shell {
         if response.clicked() {
             output.new_note = true;
         }
+    }
+
+    /// 左侧栏的一个入口：选中的出底；没做的画淡，点了只在悬停里说明还没做。
+    fn rail_button(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        icon: Icon,
+        label: &str,
+        selected: bool,
+        ready: bool,
+    ) {
+        let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(RAIL_RADIUS),
+                theme::chrome().pressed,
+            );
+        } else if ready && response.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(RAIL_RADIUS), theme::chrome().hover);
+        }
+        let color = if !ready {
+            theme::chrome().text_faint
+        } else if selected || response.hovered() {
+            theme::chrome().text
+        } else {
+            theme::chrome().text_muted
+        };
+        icons::draw(painter, rect.shrink(RAIL_BUTTON * 0.25), icon, color);
+        let tip = if ready {
+            label.to_owned()
+        } else {
+            format!("{label}：{}", strings::SHELL_NOT_YET)
+        };
+        let _ = response.on_hover_text(tip);
     }
 
     /// 一个安静的图标按钮：只在悬停时出底色，选中时图标变深。

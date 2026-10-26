@@ -18,6 +18,9 @@ pub enum Icon {
     Export,
     Doc,
     Image,
+    Page,
+    Volume,
+    Shelf,
     Audio,
     Play,
 }
@@ -87,6 +90,39 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(p(0.38, 0.4), p(0.62, 0.4));
             line(p(0.38, 0.54), p(0.62, 0.54));
             line(p(0.38, 0.68), p(0.52, 0.68));
+        }
+        Icon::Page => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(0.3, 0.14), p(0.7, 0.86)),
+                CornerRadius::same(1),
+                stroke,
+                StrokeKind::Inside,
+            );
+            line(p(0.4, 0.34), p(0.6, 0.34));
+            line(p(0.4, 0.47), p(0.6, 0.47));
+            line(p(0.4, 0.6), p(0.53, 0.6));
+        }
+        Icon::Volume => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(0.2, 0.14), p(0.45, 0.86)),
+                CornerRadius::same(1),
+                stroke,
+                StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                Rect::from_min_max(p(0.49, 0.18), p(0.79, 0.86)),
+                CornerRadius::same(1),
+                stroke,
+                StrokeKind::Inside,
+            );
+            line(p(0.26, 0.14), p(0.26, 0.86));
+        }
+        Icon::Shelf => {
+            line(p(0.16, 0.8), p(0.84, 0.8));
+            line(p(0.26, 0.34), p(0.26, 0.8));
+            line(p(0.4, 0.24), p(0.4, 0.8));
+            line(p(0.54, 0.4), p(0.54, 0.8));
+            line(p(0.68, 0.3), p(0.68, 0.8));
         }
         Icon::Image => {
             painter.rect_stroke(
