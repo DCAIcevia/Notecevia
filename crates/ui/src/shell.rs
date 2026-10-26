@@ -36,6 +36,7 @@ const ASSET_ROW: f32 = 30.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuCommand {
     NewNote,
+    ExportImage,
     ExportHtml,
     ExportContainer,
     CloseNote,
@@ -136,20 +137,7 @@ impl Shell {
             Stroke::new(1.0, theme::chrome().line),
         );
 
-        // 全局工具栏：横贯整窗，不属于哪一篇笔记。
-        let toolbar = Rect::from_min_size(
-            egui::pos2(full.min.x, top.max.y),
-            Vec2::new(full.width(), TOOLBAR_HEIGHT),
-        );
-        let zoom = board.as_ref().map_or(1.0, |board| board.view_zoom());
-        let notice = board
-            .as_ref()
-            .and_then(|board| board.notice())
-            .map(|(text, error)| (text.to_owned(), error));
-        let board_for_toolbar = board.as_deref_mut();
-        self.toolbar(ui, toolbar, zoom, notice, board_for_toolbar);
-
-        let body = Rect::from_min_max(egui::pos2(full.min.x, toolbar.max.y), full.max);
+        let body = Rect::from_min_max(egui::pos2(full.min.x, top.max.y), full.max);
 
         // 左侧栏：三层视图排一列。册与书架还没有数据，画淡、点了只说明。
         let rail = Rect::from_min_size(body.min, Vec2::new(RAIL_WIDTH, body.height()));
@@ -260,11 +248,15 @@ impl Shell {
             egui::pos2(main_left, body.min.y),
             egui::pos2(main_right, body.max.y),
         );
-        match board {
-            Some(board) => {
-                ui.scope_builder(UiBuilder::new().max_rect(main), |ui| board.ui(ui));
-            }
-            None => self.start_state(ui, main, &mut output),
+        if let Some(board) = board.as_mut() {
+            // 工具栏属于画布：对整块画布全局，不当标签栏，也不横跨侧栏。
+            let toolbar = Rect::from_min_size(main.min, Vec2::new(main.width(), TOOLBAR_HEIGHT));
+            let notice = board.notice().map(|(text, error)| (text.to_owned(), error));
+            self.toolbar(ui, toolbar, notice, Some(&mut *board));
+            let canvas = Rect::from_min_max(egui::pos2(main.min.x, toolbar.max.y), main.max);
+            ui.scope_builder(UiBuilder::new().max_rect(canvas), |ui| board.ui(ui));
+        } else {
+            self.start_state(ui, main, &mut output);
         }
         output
     }
@@ -286,7 +278,6 @@ impl Shell {
         &self,
         ui: &mut Ui,
         rect: Rect,
-        zoom: f32,
         notice: Option<(String, bool)>,
         mut board: Option<&mut BoardApp>,
     ) {
@@ -319,30 +310,7 @@ impl Shell {
             x += control + theme::ui().gap_s;
         }
 
-        let mut right = rect.max.x - theme::ui().gap_m;
-        let export = Rect::from_min_size(egui::pos2(right - control, top), Vec2::splat(control));
-        if self.tool_button(ui, export, Icon::Export, strings::EXPORT_IMAGE)
-            && let Some(board) = board.as_mut()
-        {
-            board.request_image_export();
-        }
-        right = export.min.x - theme::ui().gap_l;
-
-        let zoom_text = strings::zoom_percent(zoom);
-        let galley = painter.layout_no_wrap(
-            zoom_text,
-            FontId::monospace(theme::ui().body),
-            theme::chrome().text_muted,
-        );
-        painter.galley(
-            egui::pos2(
-                right - galley.size().x,
-                rect.center().y - galley.size().y / 2.0,
-            ),
-            galley.clone(),
-            theme::chrome().text_muted,
-        );
-        right -= galley.size().x + theme::ui().gap_l;
+        let right = rect.max.x - theme::ui().gap_m;
 
         if let Some((text, error)) = notice {
             let colour = if error {
@@ -399,6 +367,9 @@ impl Shell {
                         output.menu = Some(MenuCommand::NewNote);
                     }
                     ui.separator();
+                    if menu_item(ui, strings::EXPORT_IMAGE, "", has_note) {
+                        output.menu = Some(MenuCommand::ExportImage);
+                    }
                     if menu_item(ui, strings::MENU_EXPORT_HTML, "", has_note) {
                         output.menu = Some(MenuCommand::ExportHtml);
                     }

@@ -778,6 +778,11 @@ impl eframe::App for App {
             None => {}
             Some(MenuCommand::NewNote) => self.create_board(),
             Some(MenuCommand::CloseNote) => self.go_home(),
+            Some(MenuCommand::ExportImage) => {
+                if let Some(board) = self.board.as_mut() {
+                    board.request_image_export();
+                }
+            }
             Some(MenuCommand::ExportHtml) => {
                 if self.board.is_some() {
                     self.export(self.board_id, ExportKind::Html);
