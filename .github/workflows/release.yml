@@ -13,50 +13,52 @@ concurrency:
 
 jobs:
   windows:
-    name: 构建与发布
+    name: Build and release
     runs-on: windows-latest
     timeout-minutes: 60
     permissions:
       contents: write
     steps:
-      - name: 检出
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: 工具链
+      - name: Verify tag is on main
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag commit $env:GITHUB_SHA is not reachable from main"
+          }
+      - name: Set up Rust toolchain
         # rustup 代理按 rust-toolchain.toml 安装固定版本与组件。
-        run: cargo --version
-      - name: 编译缓存
+        run: rustup show
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: release
-      - name: 校验版本
+      - name: Verify version
         shell: pwsh
         run: |
           $metadata = cargo metadata --format-version 1 --locked --no-deps | ConvertFrom-Json
           $version = ($metadata.packages | Where-Object { $_.name -eq "notecevia-app" }).version
           if ("v$version" -ne $env:GITHUB_REF_NAME) {
-            throw "标签 $env:GITHUB_REF_NAME 与 notecevia-app 版本 $version 不一致"
+            throw "Tag $env:GITHUB_REF_NAME does not match notecevia-app version $version"
           }
-          Write-Output "标签与版本一致：$version"
-      - name: 校验三方许可
-        shell: pwsh
-        run: |
-          # 版本与 CONTRIBUTING 记录的生成命令一致；升级 cargo-about 时两处一起改。
-          cargo install cargo-about --version 0.9.2 --locked --features cli
-          cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
-          if (git status --porcelain -- THIRD_PARTY_LICENSES.md) {
-            throw "THIRD_PARTY_LICENSES.md 与当前依赖不一致，重新生成并提交后再发布"
-          }
-      - name: rustfmt
+          Write-Output "Tag matches version: $version"
+      - name: Verify third-party licenses
+        uses: ./.github/actions/verify-licenses
+      - name: Check formatting
         run: cargo fmt --all --check
-      - name: clippy
+      - name: Lint with Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: test
+      - name: Run tests
         run: cargo test --workspace --locked
-      - name: 构建
+      - name: Build release binary
         run: cargo build --release -p notecevia-app --locked
-      - name: 打包
+      - name: Package
         shell: pwsh
         run: |
           $zip = "notecevia-$env:GITHUB_REF_NAME-windows.zip"
@@ -65,11 +67,18 @@ jobs:
           Compress-Archive -Path $files -DestinationPath $zip -Force
           $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
           "$hash  $zip" | Set-Content -Path "$zip.sha256" -Encoding ascii
-      - name: 发布
+      - name: Publish release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             notecevia-${{ github.ref_name }}-windows.zip
             notecevia-${{ github.ref_name }}-windows.zip.sha256
+          # 仓库开启了 immutable releases：先建草稿并上传资产，发布后再上传会被拒绝。
+          draft: true
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+      - name: Publish the draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit $env:GITHUB_REF_NAME --draft=false

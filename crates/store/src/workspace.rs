@@ -129,7 +129,7 @@ impl Workspace {
         })
     }
 
-    /// 存盘。修改时间取当前时间；测试与导入要固定时间时用 [save_at]。
+    /// 存盘。修改时间取当前时间；测试与导入要固定时间时用 [Self::save_at]。
     pub fn save(&self, board_id: u64, document: &Document) -> Result<(), Error> {
         self.save_at(board_id, document, now_seconds())
     }
@@ -146,7 +146,7 @@ impl Workspace {
 
     /// 增量存盘：只重写 changed 里的块正文，其余块文件一个字节都不动。
     ///
-    /// 流程与 [save_at] 一样：写块 → 写画板 → 回收孤儿块 → 更新索引；时间戳取当前时间。
+    /// 流程与 [Self::save_at] 一样：写块 → 写画板 → 回收孤儿块 → 更新索引；时间戳取当前时间。
     /// changed 里有、文档里没有的编号直接跳过——删掉的块靠孤儿回收处理。
     /// 画板文件仍然整份重写（目录项可能变了），省下的是块文件与它们的 fsync。
     pub fn save_changed(

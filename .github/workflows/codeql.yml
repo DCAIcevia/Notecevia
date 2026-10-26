@@ -1,20 +1,12 @@
 name: CodeQL
 
+# main 的 ruleset 要求代码扫描结果，只改文档的合并请求也必须有一次分析，
+# 否则会停在「等待代码扫描结果」。这里按事件触发，不按路径过滤。
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/codeql.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/codeql.yml"
   schedule:
     - cron: "0 3 * * 1"
   workflow_dispatch:
@@ -36,15 +28,15 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - name: 检出
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 初始化
+      - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           languages: rust
           # Rust 没有构建命令，CodeQL 以无构建模式分析。
           build-mode: none
-      - name: 分析
+      - name: Analyze
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4

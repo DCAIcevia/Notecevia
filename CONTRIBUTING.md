@@ -21,7 +21,7 @@
 
 ## 依赖
 
-新增依赖需同时满足：许可证在 `deny.toml` 的允许列表内，来源为 crates.io。审计工作流每周运行一次，列表外的许可证会使审计失败；确认可以接受后，把许可证加入 `deny.toml`。
+新增依赖需同时满足：许可证在 `deny.toml` 的允许列表内，来源为 crates.io。CI 在每次推送与合并请求上审计依赖，审计工作流每周再跑一次完整检查；列表外的许可证会使审计失败，确认可以接受后，把许可证加入 `deny.toml`。
 
 `THIRD_PARTY_LICENSES.md` 由 `cargo about` 从当前依赖图生成，随二进制一起分发。依赖变化后重新生成并一并提交：
 
@@ -41,4 +41,4 @@ cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
 
 推 `v*` 标签触发发布流程：CI 跑门禁、构建、打包并创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。
 
-发布流程校验标签与 `notecevia-app` 的版本一致，不一致即失败；产物附 SHA256 校验和。
+发布流程校验标签与 `notecevia-app` 的版本一致、标签提交在 `main` 上，不一致即失败；产物附 SHA256 校验和。发布先创建草稿并上传资产，再转为正式发布；`v*` 标签由 ruleset 保护，不能删除或移动。
