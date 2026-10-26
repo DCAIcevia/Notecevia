@@ -69,6 +69,8 @@ struct App {
     want_thumbnail: bool,
     /// 上一次重画缩略图的时间。
     last_thumbnail_at: f64,
+    /// 缩略图那一帧用临时视图，下一帧要还原。
+    restore_thumbnail_view: bool,
     /// 开发检查用：跑起来先存一次盘，确认缩略图真的会生成。
     thumbnail_check: bool,
     /// 开发检查用：跑起来截一张当前画布，确认导出图片的链路通。
@@ -94,6 +96,7 @@ impl App {
             capture_busy: false,
             want_thumbnail: false,
             last_thumbnail_at: f64::NEG_INFINITY,
+            restore_thumbnail_view: false,
             thumbnail_check: false,
             image_check: false,
             boards_stamp: None,
@@ -539,40 +542,44 @@ impl App {
         self.request_capture(ctx, path, rect, None, true);
     }
 
-    /// 保存之后顺手重画一张缩略图，首页列表直接读它。
-    fn maybe_capture_thumbnail(&mut self, ctx: &egui::Context) {
-        if !self.want_thumbnail || self.capture_busy {
-            return;
+    /// 该不该为缩略图把视图缩到全貌。窗口聚焦时不做，免得用户看到一帧缩放闪动。
+    fn should_fit_thumbnail(&self, ctx: &egui::Context) -> bool {
+        if !self.want_thumbnail || self.capture_busy || self.restore_thumbnail_view {
+            return false;
+        }
+        if self.board.as_ref().is_some_and(BoardApp::is_dirty) {
+            return false;
         }
         if self.shot.is_some() && !self.thumbnail_check {
-            return;
+            return false;
         }
-        let Some(board) = self.board.as_ref() else {
-            self.want_thumbnail = false;
-            return;
-        };
-        if board.is_dirty() {
-            return;
+        if ctx.input(|input| input.focused) && !self.thumbnail_check {
+            return false;
         }
         let now = ctx.input(|input| input.time);
-        if now - self.last_thumbnail_at < THUMBNAIL_SECONDS {
-            return;
-        }
-        let rect = board.canvas_rect();
-        let Some(dir) = self
+        now - self.last_thumbnail_at >= THUMBNAIL_SECONDS
+    }
+
+    /// 截一张当前画布的缩略图存进工作区。调用前视图已经被缩到内容全貌。
+    fn capture_thumbnail(&mut self, ctx: &egui::Context) {
+        self.want_thumbnail = false;
+        self.last_thumbnail_at = ctx.input(|input| input.time);
+        let rect = self.board.as_ref().map(BoardApp::canvas_rect);
+        let dir = self
             .workspace
             .as_ref()
-            .map(|it| it.root().join("thumbnails"))
-        else {
+            .map(|it| it.root().join("thumbnails"));
+        let (Some(rect), Some(dir)) = (rect, dir) else {
+            self.restore_thumbnail_view = true;
             return;
         };
-        self.want_thumbnail = false;
-        self.last_thumbnail_at = now;
         if std::fs::create_dir_all(&dir).is_err() {
+            self.restore_thumbnail_view = true;
             return;
         }
         let path = dir.join(format!("{}.png", self.board_id));
         self.request_capture(ctx, path, rect, Some(THUMBNAIL_WIDTH), false);
+        self.restore_thumbnail_view = true;
     }
 
     /// 请求一帧截图，按给定画布矩形裁剪后写成 PNG。
@@ -607,15 +614,26 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.take_capture_result();
         if self.board.is_some() {
+            if std::mem::take(&mut self.restore_thumbnail_view)
+                && let Some(board) = self.board.as_mut()
+            {
+                board.end_thumbnail_view();
+            }
+            let fits_thumbnail = self.should_fit_thumbnail(&ctx);
+            if fits_thumbnail && let Some(board) = self.board.as_mut() {
+                board.begin_thumbnail_view();
+            }
             if let Some(board) = self.board.as_mut() {
                 board.ui(ui);
+            }
+            if fits_thumbnail {
+                self.capture_thumbnail(&ctx);
             }
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::S)) {
                 self.save();
             }
             self.autosave(&ctx);
             self.handle_image_export(&ctx);
-            self.maybe_capture_thumbnail(&ctx);
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N)) {
                 self.create_board();
             }
