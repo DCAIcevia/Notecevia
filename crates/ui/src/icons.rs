@@ -93,36 +93,36 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Page => {
             painter.rect_stroke(
-                Rect::from_min_max(p(0.3, 0.14), p(0.7, 0.86)),
+                Rect::from_min_max(p(0.27, 0.12), p(0.73, 0.88)),
                 CornerRadius::same(1),
                 stroke,
                 StrokeKind::Inside,
             );
-            line(p(0.4, 0.34), p(0.6, 0.34));
-            line(p(0.4, 0.47), p(0.6, 0.47));
-            line(p(0.4, 0.6), p(0.53, 0.6));
+            line(p(0.37, 0.32), p(0.63, 0.32));
+            line(p(0.37, 0.46), p(0.63, 0.46));
+            line(p(0.37, 0.6), p(0.52, 0.6));
         }
         Icon::Volume => {
             painter.rect_stroke(
-                Rect::from_min_max(p(0.2, 0.14), p(0.45, 0.86)),
+                Rect::from_min_max(p(0.18, 0.12), p(0.45, 0.88)),
                 CornerRadius::same(1),
                 stroke,
                 StrokeKind::Inside,
             );
             painter.rect_stroke(
-                Rect::from_min_max(p(0.49, 0.18), p(0.79, 0.86)),
+                Rect::from_min_max(p(0.49, 0.16), p(0.82, 0.88)),
                 CornerRadius::same(1),
                 stroke,
                 StrokeKind::Inside,
             );
-            line(p(0.26, 0.14), p(0.26, 0.86));
+            line(p(0.24, 0.12), p(0.24, 0.88));
         }
         Icon::Shelf => {
-            line(p(0.16, 0.8), p(0.84, 0.8));
-            line(p(0.26, 0.34), p(0.26, 0.8));
-            line(p(0.4, 0.24), p(0.4, 0.8));
-            line(p(0.54, 0.4), p(0.54, 0.8));
-            line(p(0.68, 0.3), p(0.68, 0.8));
+            line(p(0.16, 0.82), p(0.84, 0.82));
+            line(p(0.26, 0.3), p(0.26, 0.82));
+            line(p(0.4, 0.16), p(0.4, 0.82));
+            line(p(0.54, 0.36), p(0.54, 0.82));
+            line(p(0.68, 0.22), p(0.68, 0.82));
         }
         Icon::Image => {
             painter.rect_stroke(

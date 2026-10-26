@@ -213,7 +213,7 @@ impl HomeApp {
     }
 
     /// 画一帧侧栏列表，返回用户这一帧想做的动作。
-    pub fn sidebar(&mut self, ui: &mut egui::Ui) -> Option<HomeAction> {
+    pub fn sidebar(&mut self, ui: &mut egui::Ui, query: &mut String) -> Option<HomeAction> {
         let mut action = None;
         let Self {
             boards, state, now, ..
@@ -223,7 +223,7 @@ impl HomeApp {
         state.tick_status(time);
         state.typing = false;
 
-        head_row(ui, &mut action);
+        head_row(ui, query, &mut action);
 
         let footer = if state.status.is_some() {
             theme::ui().control_height
@@ -280,17 +280,57 @@ impl Default for HomeApp {
     }
 }
 
-/// 顶部一行：右边一个「＋」。不写标题，也不写计数。
-fn head_row(ui: &mut Ui, action: &mut Option<HomeAction>) {
+/// 顶部一行：左边搜索框，右边一个「＋」。不写标题，也不写计数。
+///
+/// 搜索贴着列表放：它是筛这张列表的，不是全局的，放顶栏会让人以为是全站搜索。
+fn head_row(ui: &mut Ui, query: &mut String, action: &mut Option<HomeAction>) {
     let (_, row) = ui.allocate_space(vec2(ui.available_width(), TOP_BAR_HEIGHT));
-    let button = Rect::from_center_size(
-        pos2(
-            row.right() - theme::ui().gap_m - theme::ui().control_height / 2.0,
-            row.center().y,
-        ),
-        Vec2::splat(theme::ui().control_height),
+    let control = theme::ui().control_height;
+    let inner = row.shrink2(Vec2::new(
+        theme::ui().gap_m,
+        (TOP_BAR_HEIGHT - control) / 2.0,
+    ));
+    let plus = Rect::from_center_size(
+        pos2(inner.right() - control / 2.0, inner.center().y),
+        Vec2::splat(control),
     );
-    if icon_button(ui, button, Icon::Plus, strings::SIDEBAR_NEW) {
+    let field = Rect::from_min_max(inner.min, pos2(plus.min.x - theme::ui().gap_m, inner.max.y));
+    ui.painter().rect_filled(
+        field,
+        CornerRadius::same(theme::ui().radius_control),
+        theme::chrome().field,
+    );
+    icons::draw(
+        ui.painter(),
+        Rect::from_center_size(
+            pos2(field.min.x + 14.0, field.center().y),
+            Vec2::splat(14.0),
+        ),
+        Icon::Search,
+        theme::chrome().text_faint,
+    );
+    let text_rect = Rect::from_min_max(
+        pos2(field.min.x + 26.0, field.min.y + 4.0),
+        pos2(field.max.x - theme::ui().gap_s, field.max.y - 4.0),
+    );
+    let id = ui.scope_id().with("note-search");
+    let before = query.clone();
+    let edit = egui::TextEdit::singleline(query)
+        .id(id)
+        .frame(egui::Frame::NONE)
+        .hint_text(strings::SHELL_SEARCH)
+        .desired_width(text_rect.width());
+    ui.put(text_rect, edit);
+    if ui
+        .ctx()
+        .input(|input| input.modifiers.command && input.key_pressed(egui::Key::K))
+    {
+        ui.memory_mut(|memory| memory.request_focus(id));
+    }
+    if *query != before {
+        *action = Some(HomeAction::Search(query.clone()));
+    }
+    if icon_button(ui, plus, Icon::Plus, strings::SIDEBAR_NEW) {
         *action = Some(HomeAction::Create);
     }
 }
@@ -883,7 +923,7 @@ mod tests {
         };
         let mut action = None;
         let mut output = ctx.run_ui(input, |ui| {
-            action = app.sidebar(ui);
+            action = app.sidebar(ui, &mut String::new());
         });
         // 测试里没有渲染后端消费纹理上传，丢掉增量。
         output.textures_delta.clear();
@@ -1146,7 +1186,7 @@ mod tests {
             ..Default::default()
         };
         let mut output = ctx.run_ui(input, |ui| {
-            let _ = app.sidebar(ui);
+            let _ = app.sidebar(ui, &mut String::new());
         });
         output.textures_delta.clear();
         assert_eq!(app.state.selected, Some(2));
@@ -1185,7 +1225,7 @@ mod tests {
         };
         let mut action = None;
         let mut output = ctx.run_ui(input, |ui| {
-            action = app.sidebar(ui);
+            action = app.sidebar(ui, &mut String::new());
         });
         output.textures_delta.clear();
         // 新建键只在 app 里处理一次；侧栏再发一次就会一按建两张。

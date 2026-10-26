@@ -16,16 +16,17 @@ use crate::theme;
 /// 顶栏高。外壳里所有面板的头部都跟它等高，横线才对得齐。
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
 /// 最左图标条宽。
-pub const RAIL_WIDTH: f32 = 48.0;
+pub const RAIL_WIDTH: f32 = 52.0;
 /// 左侧边栏宽。
 pub const LIST_WIDTH: f32 = 264.0;
 /// 右侧资源栏宽。
 pub const ASSETS_WIDTH: f32 = 280.0;
 /// 图标条里按钮的边长与圆角。
-const RAIL_BUTTON: f32 = 32.0;
+const RAIL_BUTTON: f32 = 36.0;
+/// 图标在按钮里留多少边：36 的按钮画 20 的图标，纯图标的栏不能再小。
+const RAIL_ICON_PAD: f32 = 8.0;
 const RAIL_RADIUS: u8 = 8;
 /// 顶栏里搜索框的宽。
-const SEARCH_WIDTH: f32 = 340.0;
 /// 资源栏里一行的行高。
 const ASSET_ROW: f32 = 30.0;
 
@@ -71,7 +72,6 @@ pub struct ShellOutput {
 /// 外壳自己的界面状态：搜索词与两块面板的开合。与笔记数据无关。
 pub struct Shell {
     query: String,
-    last_query: String,
     list_open: bool,
     assets_open: bool,
     view: ViewMode,
@@ -87,7 +87,6 @@ impl Shell {
     pub fn new() -> Self {
         Self {
             query: String::new(),
-            last_query: String::new(),
             list_open: true,
             assets_open: true,
             view: ViewMode::Page,
@@ -161,6 +160,36 @@ impl Shell {
             );
             self.rail_button(ui, rect, icon, label, self.view == mode, ready);
         }
+        // 底部的两个收起键：纯图标栏的惯例位置，不占顶栏，也不跟视图混在一起。
+        for (index, (icon, tip, open)) in [
+            (Icon::PanelLeft, strings::SHELL_TOGGLE_LIST, self.list_open),
+            (
+                Icon::PanelRight,
+                strings::SHELL_TOGGLE_ASSETS,
+                self.assets_open,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = Rect::from_center_size(
+                egui::pos2(
+                    rail.center().x,
+                    rail.max.y
+                        - theme::ui().gap_m
+                        - RAIL_BUTTON / 2.0
+                        - index as f32 * (RAIL_BUTTON + 2.0),
+                ),
+                Vec2::splat(RAIL_BUTTON),
+            );
+            if self.rail_toggle(ui, rect, icon, tip) {
+                if index == 0 {
+                    self.list_open = !open;
+                } else {
+                    self.assets_open = !open;
+                }
+            }
+        }
 
         // 左侧边栏：笔记列表，由 HomeApp 画内容。
         let mut main_left = rail.max.x;
@@ -175,7 +204,7 @@ impl Shell {
                 Stroke::new(1.0, theme::chrome().line),
             );
             ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
-                output.home = home.sidebar(ui);
+                output.home = home.sidebar(ui, &mut self.query);
             });
             main_left = list.max.x;
         }
@@ -216,85 +245,12 @@ impl Shell {
 
     /// 顶栏：左折叠与菜单，右搜索与折叠资源栏。
     fn top_bar(&mut self, ui: &mut Ui, rect: Rect, has_note: bool, output: &mut ShellOutput) {
-        let painter = ui.painter().clone();
-        let center = rect.center().y;
-        let control = theme::ui().control_height;
-        let inset = theme::ui().gap_m;
-
-        // 左右两个折叠键同尺寸、同贴边距离，顶栏才不歪。
-        let toggle = Rect::from_center_size(
-            egui::pos2(rect.min.x + inset + control / 2.0, center),
-            Vec2::splat(control),
-        );
-        if self.icon_button(ui, toggle, Icon::PanelLeft, strings::SHELL_TOGGLE_LIST) {
-            self.list_open = !self.list_open;
-        }
-
-        let toggle_assets = Rect::from_center_size(
-            egui::pos2(rect.max.x - inset - control / 2.0, center),
-            Vec2::splat(control),
-        );
-        if self.icon_button(
-            ui,
-            toggle_assets,
-            Icon::PanelRight,
-            strings::SHELL_TOGGLE_ASSETS,
-        ) {
-            self.assets_open = !self.assets_open;
-        }
-
-        // 搜索框按窗口中线摆，不按剩下的空隙摆，窗口拉宽拉窄都不会跑偏。
-        let field_width = (rect.width() * 0.3).clamp(220.0, SEARCH_WIDTH);
-        let field = Rect::from_center_size(
-            egui::pos2(rect.center().x, center),
-            Vec2::new(field_width, control),
-        );
-
-        // 菜单栏占左边剩下的那段，老派的一条。
+        // 顶栏只剩菜单：搜索搬进了左侧边栏，收起键搬到了图标条底部。
         let menus = Rect::from_min_max(
-            egui::pos2(toggle.max.x + theme::ui().gap_l, rect.min.y + 4.0),
-            egui::pos2(field.min.x - theme::ui().gap_l, rect.max.y - 4.0),
+            egui::pos2(rect.min.x + theme::ui().gap_s, rect.min.y + 4.0),
+            egui::pos2(rect.max.x - theme::ui().gap_m, rect.max.y - 4.0),
         );
         self.menu_bar(ui, menus, has_note, output);
-        painter.rect_filled(
-            field,
-            CornerRadius::same(theme::ui().radius_control),
-            theme::chrome().field,
-        );
-        icons::draw(
-            &painter,
-            Rect::from_center_size(
-                egui::pos2(field.min.x + theme::ui().gap_m + 7.0, field.center().y),
-                Vec2::splat(14.0),
-            ),
-            Icon::Search,
-            theme::chrome().text_faint,
-        );
-
-        let text_rect = Rect::from_min_max(
-            egui::pos2(field.min.x + 26.0, field.min.y + 4.0),
-            egui::pos2(field.max.x - theme::ui().gap_m, field.max.y - 4.0),
-        );
-        let id = ui.scope_id().with("shell-search");
-        let edit = egui::TextEdit::singleline(&mut self.query)
-            .id(id)
-            .frame(egui::Frame::NONE)
-            .hint_text(strings::SHELL_SEARCH)
-            .desired_width(text_rect.width());
-        ui.put(text_rect, edit);
-        if ui
-            .ctx()
-            .input(|input| input.modifiers.command && input.key_pressed(egui::Key::K))
-        {
-            ui.memory_mut(|memory| memory.request_focus(id));
-        }
-        if self.query != self.last_query {
-            self.last_query = self.query.clone();
-            if !self.list_open {
-                self.list_open = true;
-            }
-            output.home = Some(HomeAction::Search(self.query.clone()));
-        }
     }
 
     /// 菜单栏：文件 / 编辑 / 选择 / 视图 / 帮助。一条老派的栏。
@@ -481,7 +437,7 @@ impl Shell {
         } else {
             theme::chrome().text_muted
         };
-        icons::draw(painter, rect.shrink(RAIL_BUTTON * 0.25), icon, color);
+        icons::draw(painter, rect.shrink(RAIL_ICON_PAD), icon, color);
         let tip = if ready {
             label.to_owned()
         } else {
@@ -490,24 +446,20 @@ impl Shell {
         let _ = response.on_hover_text(tip);
     }
 
-    /// 一个安静的图标按钮：只在悬停时出底色，选中时图标变深。
-    fn icon_button(&self, ui: &mut Ui, rect: Rect, icon: Icon, tip: &str) -> bool {
-        let response = ui.interact(rect, ui.scope_id().with(tip), Sense::click());
+    /// 图标条底部的收起键：悬停出底，图标比视图键浅一档。
+    fn rail_toggle(&self, ui: &mut Ui, rect: Rect, icon: Icon, label: &str) -> bool {
+        let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
         let painter = ui.painter();
         if response.hovered() {
-            painter.rect_filled(
-                rect,
-                CornerRadius::same(theme::ui().radius_control),
-                theme::chrome().hover,
-            );
+            painter.rect_filled(rect, CornerRadius::same(RAIL_RADIUS), theme::chrome().hover);
         }
         let color = if response.hovered() {
             theme::chrome().text
         } else {
-            theme::chrome().text_muted
+            theme::chrome().text_faint
         };
-        icons::draw(painter, rect.shrink(6.0), icon, color);
-        response.on_hover_text(tip).clicked()
+        icons::draw(painter, rect.shrink(RAIL_ICON_PAD), icon, color);
+        response.on_hover_text(label).clicked()
     }
 }
 
