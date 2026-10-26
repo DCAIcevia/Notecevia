@@ -13,6 +13,8 @@ pub struct Palette {
     pub hover_edge: Color32,
     pub text: Color32,
     pub muted: Color32,
+    /// 错误状态用的颜色。只表示失败，不表示强调。
+    pub danger: Color32,
 }
 
 /// 世界坐标里的尺寸。绘制时乘以缩放，画面上才不会随窗口变大变小。
@@ -29,6 +31,14 @@ pub const BLOCK_RADIUS: f32 = 8.0;
 pub const EDGE_WIDTH: f32 = 1.0;
 pub const HINT_INSET: f32 = 12.0;
 pub const HINT_PAD: f32 = 6.0;
+
+/// 选框与选中底色这类临时覆盖层的不透明度。
+/// 覆盖层只解释状态，不加边框，也不改变几何。
+pub const MARQUEE_ALPHA: u8 = 26;
+
+/// 表格单元格与媒体瓦片的内边距，单位是世界坐标里的点。
+pub const CELL_PAD: f32 = 5.0;
+pub const TILE_PAD: f32 = 10.0;
 
 /// 界面里能选的文字字号，单位是世界坐标里的点。
 pub const TEXT_SIZES: [f32; 6] = [12.0, 14.0, 16.0, 20.0, 26.0, 34.0];
@@ -54,6 +64,7 @@ pub fn palette(dark: bool) -> Palette {
             hover_edge: Color32::from_rgb(78, 78, 86),
             text: Color32::from_rgb(233, 233, 236),
             muted: Color32::from_rgb(142, 142, 150),
+            danger: Color32::from_rgb(236, 122, 122),
         }
     } else {
         Palette {
@@ -64,6 +75,7 @@ pub fn palette(dark: bool) -> Palette {
             hover_edge: Color32::from_rgb(196, 196, 203),
             text: Color32::from_rgb(28, 28, 31),
             muted: Color32::from_rgb(110, 110, 118),
+            danger: Color32::from_rgb(178, 42, 42),
         }
     }
 }
