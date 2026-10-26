@@ -6,7 +6,9 @@ pub mod board;
 pub mod chrome;
 pub mod fonts;
 pub mod home;
+pub mod icons;
 pub mod media;
+pub mod shell;
 pub mod strings;
 pub mod theme;
 

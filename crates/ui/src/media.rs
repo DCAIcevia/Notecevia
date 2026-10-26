@@ -11,6 +11,12 @@ use egui::{ColorImage, Context, TextureHandle, TextureId, TextureOptions, Vec2};
 /// 按内容哈希取媒体原始字节。取不到返回 None，界面画占位。
 pub trait MediaSource {
     fn media(&self, hash: &str) -> Option<Vec<u8>>;
+
+    /// 只问大小，不读内容。资源栏要显示体积，但不想为了几个字节去读整张图。
+    /// 取不到就返回 None，界面不显示大小，不显示 0。
+    fn media_len(&self, _hash: &str) -> Option<u64> {
+        None
+    }
 }
 
 impl MediaSource for () {

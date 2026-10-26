@@ -1,68 +1,78 @@
-//! 画布之外的界面：顶栏与选中块的操作条。
+//! 画布之外的界面：画布栏与选中块的操作条。
 //!
-//! 这里的东西守同一条规矩：没有内容的时候不占地方。顶栏只放返回、新建、画板名与
-//! 保存状态；格式操作只在选中块时浮在选区上方，取消选中就消失。
+//! 这里守同一条规矩：没有内容的时候不占地方。画布栏只放标题、缩放与两个图标；
+//! 格式操作只在选中块时浮在选区上方，取消选中就消失。
 
 use std::collections::HashSet;
 
-use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
+use egui::{
+    Align, Align2, Color32, CornerRadius, FontId, Layout, Pos2, Rect, Sense, Stroke, StrokeKind,
+    Vec2,
+};
 
 use notecevia_core::board::{Document, Entry, TextBlock};
 use notecevia_core::{Alignment, Axis, BlockKind, Body, ImageFit, ShapeKind};
 
+use crate::icons::{self, Icon};
 use crate::{fonts::FontLibrary, strings, theme};
 
-/// 顶栏高度。画布从这条线以下开始。
-pub const TOP_BAR_HEIGHT: f32 = 40.0;
+/// 画布栏高度。画布从这条线以下开始。
+pub const CANVAS_BAR_HEIGHT: f32 = 48.0;
 
-const TOOLBAR_ROW_HEIGHT: f32 = 28.0;
-const TOOLBAR_ROW_GAP: f32 = 6.0;
-const TOOLBAR_ITEM_GAP: f32 = 4.0;
-const TOOLBAR_GAP: f32 = 8.0;
-const BAR_PAD: f32 = 8.0;
+/// 图标在 28×28 按钮里的边长。
+const ICON_SIZE: f32 = 16.0;
 /// 操作条一行最宽多少；再宽就折行，不挡内容。
 const MAX_ROW_WIDTH: f32 = 560.0;
-const RADIUS: u8 = 6;
-const RADIUS_SMALL: u8 = 4;
 
-/// 顶栏上按出来的动作。
-pub struct TopBarOutput {
-    pub home: bool,
+/// 画布栏上按出来的动作。
+pub struct CanvasBarOutput {
     pub new_kind: Option<BlockKind>,
     pub export_image: bool,
 }
 
-/// 顶栏：左边返回、新建与导出图片，中间画板名，右边保存状态。
-pub fn top_bar(
+/// 画布栏：左段是笔记标题与其后的插入入口，右段只有缩放与导出。
+///
+/// 状态只在失败时出字（danger，常驻）；成功与"改过了"都不出字，
+/// 画布不抢内容的风头。
+pub fn canvas_bar(
     ui: &mut egui::Ui,
-    palette: &theme::Palette,
     rect: Rect,
     title: &str,
+    zoom: f32,
     state: &str,
     error: bool,
-) -> TopBarOutput {
+) -> CanvasBarOutput {
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::ZERO, palette.canvas);
+    painter.rect_filled(rect, CornerRadius::ZERO, theme::chrome().window);
     painter.line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, palette.edge),
+        Stroke::new(1.0, theme::chrome().line_soft),
     );
 
-    let inner = rect.shrink2(Vec2::new(theme::HINT_INSET, 5.0));
-    let mut output = TopBarOutput {
-        home: false,
+    let inner = rect.shrink2(Vec2::new(theme::ui().gap_l, 0.0));
+    let mut output = CanvasBarOutput {
         new_kind: None,
         export_image: false,
     };
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
         ui.horizontal_centered(|ui| {
-            if ui.button(strings::BACK_TO_HOME).clicked() {
-                output.home = true;
-            }
-            let picked = ui
-                .menu_button(strings::NEW_MENU, |ui| {
-                    let mut picked = None;
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(title)
+                        .size(theme::ui().title)
+                        .strong()
+                        .color(theme::chrome().text),
+                )
+                .truncate(),
+            );
+
+            // 标题与插入入口之间留一档 L 的间距；item 间距本身已经有一档 M。
+            ui.add_space(theme::ui().gap_l - theme::ui().gap_m);
+            let add = icon_button(ui, Icon::Plus, strings::NEW_BLOCK);
+            let open_by_key = keyboard_activated(ui, &add);
+            egui::Popup::menu(&add)
+                .open_memory(open_by_key.then_some(egui::SetOpenCommand::Toggle))
+                .show(|ui| {
                     for (label, kind) in [
                         (strings::NEW_TEXT, BlockKind::Text),
                         (strings::NEW_TABLE, BlockKind::Table),
@@ -70,41 +80,85 @@ pub fn top_bar(
                         (strings::NEW_HIGHLIGHT, BlockKind::Highlight),
                     ] {
                         if ui.button(label).clicked() {
-                            picked = Some(kind);
+                            output.new_kind = Some(kind);
                             ui.close();
                         }
                     }
-                    picked
-                })
-                .inner
-                .flatten();
-            if picked.is_some() {
-                output.new_kind = picked;
-            }
-            if ui.button(strings::EXPORT_IMAGE).clicked() {
-                output.export_image = true;
-            }
+                });
 
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new(title)
-                    .color(palette.text)
-                    .size(theme::BLOCK_FONT),
-            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let export = icon_button(ui, Icon::Export, strings::EXPORT_IMAGE);
+                if export.clicked() || keyboard_activated(ui, &export) {
+                    output.export_image = true;
+                }
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(strings::zoom_percent(zoom))
+                        .size(theme::ui().body)
+                        .monospace()
+                        .color(theme::chrome().text_muted),
+                );
+
                 if !state.is_empty() {
-                    let colour = if error { palette.danger } else { palette.muted };
-                    ui.label(
-                        egui::RichText::new(state)
-                            .color(colour)
-                            .size(theme::SMALL_FONT),
+                    let colour = if error {
+                        theme::chrome().danger
+                    } else {
+                        theme::chrome().text_faint
+                    };
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(state)
+                                .size(theme::ui().meta)
+                                .color(colour),
+                        )
+                        .truncate(),
                     );
                 }
             });
         });
     });
     output
+}
+
+/// 28×28 的图标按钮：圆角 6，悬停与焦点只换底色，几何不动。
+fn icon_button(ui: &mut egui::Ui, icon: Icon, tooltip: &str) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::splat(theme::ui().control_height), Sense::click());
+    let painter = ui.painter();
+    let active = response.has_focus() || response.is_pointer_button_down_on();
+    if active {
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::ui().radius_control),
+            theme::chrome().pressed,
+        );
+    } else if response.hovered() {
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::ui().radius_control),
+            theme::chrome().hover,
+        );
+    }
+    let colour = if response.hovered() || active {
+        theme::chrome().text
+    } else {
+        theme::chrome().text_muted
+    };
+    icons::draw(
+        painter,
+        Rect::from_center_size(rect.center(), Vec2::splat(ICON_SIZE)),
+        icon,
+        colour,
+    );
+    response.on_hover_text(tooltip)
+}
+
+/// Tab 到按钮上之后按 Enter 或空格，等价于点一下。
+fn keyboard_activated(ui: &egui::Ui, response: &egui::Response) -> bool {
+    response.has_focus()
+        && ui.input(|input| {
+            input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
+        })
 }
 
 /// 选字体要用的状态，由界面持有。
@@ -136,7 +190,6 @@ pub enum Command {
     Lock(bool),
     Show(bool),
     Duplicate,
-    Delete,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -153,7 +206,6 @@ enum Item {
         label: &'static str,
         command: Command,
         active: bool,
-        danger: bool,
     },
     Step {
         label: &'static str,
@@ -175,8 +227,8 @@ impl Item {
     fn width(&self) -> f32 {
         match self {
             Self::Action { label, .. } => label_width(label),
-            Self::Step { .. } => 28.0,
-            Self::Colour { .. } => 28.0,
+            Self::Step { .. } => theme::ui().control_height,
+            Self::Colour { .. } => theme::ui().control_height,
             Self::Font { .. } => 86.0,
             Self::Opacity { .. } => 104.0,
         }
@@ -188,7 +240,7 @@ fn label_width(label: &str) -> f32 {
         .chars()
         .map(|character| if character.is_ascii() { 7.0 } else { 12.0 })
         .sum();
-    (text + 12.0).max(28.0)
+    (text + 12.0).max(theme::ui().control_height)
 }
 
 fn action(label: &'static str, command: Command) -> Item {
@@ -196,7 +248,6 @@ fn action(label: &'static str, command: Command) -> Item {
         label,
         command,
         active: false,
-        danger: false,
     }
 }
 
@@ -260,13 +311,8 @@ pub fn selection_toolbar(
         },
         Command::Show(any_hidden),
     ));
+    // 删除只走键盘 Delete：点一下块就出红色「删除」太容易误删，工具条里不放这一项。
     items.push(action(strings::DUPLICATE, Command::Duplicate));
-    items.push(Item::Action {
-        label: strings::DELETE,
-        command: Command::Delete,
-        active: false,
-        danger: true,
-    });
 
     draw_items(ui, palette, items, anchor, area, picker)
 }
@@ -310,7 +356,6 @@ fn single_block_items(items: &mut Vec<Item>, document: &Document, entry: &Entry)
                     label,
                     command: Command::SetImageFit(fit),
                     active: image.fit == fit,
-                    danger: false,
                 });
             }
         }
@@ -331,7 +376,6 @@ fn single_block_items(items: &mut Vec<Item>, document: &Document, entry: &Entry)
                     label,
                     command: Command::SetShapeKind(kind),
                     active: shape.shape == kind,
-                    danger: false,
                 });
             }
             items.push(Item::Colour {
@@ -378,45 +422,49 @@ fn draw_items(
             x = 0.0;
         }
         rects.push(Rect::from_min_size(
-            Pos2::new(x, row as f32 * (TOOLBAR_ROW_HEIGHT + TOOLBAR_ROW_GAP)),
-            Vec2::new(item_width, TOOLBAR_ROW_HEIGHT),
+            Pos2::new(
+                x,
+                row as f32 * (theme::ui().control_height + theme::ui().gap_s),
+            ),
+            Vec2::new(item_width, theme::ui().control_height),
         ));
-        x += item_width + TOOLBAR_ITEM_GAP;
-        width = width.max(x - TOOLBAR_ITEM_GAP);
+        x += item_width + theme::ui().gap_s;
+        width = width.max(x - theme::ui().gap_s);
     }
     let rows = row + 1;
-    let bar_width = width + BAR_PAD * 2.0;
-    let bar_height =
-        rows as f32 * TOOLBAR_ROW_HEIGHT + (rows - 1) as f32 * TOOLBAR_ROW_GAP + BAR_PAD * 2.0;
+    let bar_width = width + theme::ui().gap_m * 2.0;
+    let bar_height = rows as f32 * theme::ui().control_height
+        + (rows - 1) as f32 * theme::ui().gap_s
+        + theme::ui().gap_m * 2.0;
     let (left, top) = bar_position(anchor, area, bar_width, bar_height);
     let bar = Rect::from_min_size(Pos2::new(left, top), Vec2::new(bar_width, bar_height));
 
     // 取一份自己的 painter：下面要 `ui.put` 放滑杆，不能一直借着 ui。
     let painter = ui.painter().clone();
-    painter.rect(
+    // 有阴影的表面不再叠边框：浮层只靠阴影和画布分开。
+    painter.add(
+        ui.style()
+            .visuals
+            .popup_shadow
+            .as_shape(bar, CornerRadius::same(theme::ui().radius_surface)),
+    );
+    painter.rect_filled(
         bar,
-        CornerRadius::same(RADIUS),
+        CornerRadius::same(theme::ui().radius_surface),
         palette.block_fill,
-        Stroke::new(1.0, palette.edge),
-        StrokeKind::Inside,
     );
 
     let mut commands = Vec::new();
     for (index, (item, rect)) in items.iter().zip(rects).enumerate() {
-        let rect = rect.translate(bar.min.to_vec2() + Vec2::splat(BAR_PAD));
+        let rect = rect.translate(bar.min.to_vec2() + Vec2::splat(theme::ui().gap_m));
         match item {
             Item::Action {
                 label,
                 command,
                 active,
-                danger,
             } => {
-                let colour = if *danger {
-                    palette.danger
-                } else {
-                    palette.text
-                };
-                let response = toolbar_button(ui, &painter, palette, rect, label, *active, colour);
+                let response =
+                    toolbar_button(ui, &painter, palette, rect, label, *active, palette.text);
                 if response.clicked() {
                     commands.push(command.clone());
                 }
@@ -483,16 +531,16 @@ fn colour_command(target: ColourTarget, value: Option<[u8; 3]>) -> Option<Comman
 }
 
 fn bar_position(anchor: Rect, area: Rect, width: f32, height: f32) -> (f32, f32) {
-    let min_top = area.top() + 4.0;
-    let max_top = (area.bottom() - height - 4.0).max(min_top);
-    let above = anchor.top() - TOOLBAR_GAP - height;
+    let min_top = area.top() + theme::ui().gap_s;
+    let max_top = (area.bottom() - height - theme::ui().gap_s).max(min_top);
+    let above = anchor.top() - theme::ui().gap_m - height;
     let top = if above >= min_top {
         above
     } else {
-        anchor.bottom() + TOOLBAR_GAP
+        anchor.bottom() + theme::ui().gap_m
     };
-    let min_left = area.left() + 4.0;
-    let max_left = (area.right() - width - 4.0).max(min_left);
+    let min_left = area.left() + theme::ui().gap_s;
+    let max_left = (area.right() - width - theme::ui().gap_s).max(min_left);
     let left = (anchor.center().x - width / 2.0).clamp(min_left, max_left);
     (left, top.clamp(min_top, max_top))
 }
@@ -513,7 +561,11 @@ fn toolbar_button(
         Sense::click(),
     );
     if active || response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(RADIUS_SMALL), palette.media_fill);
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::ui().radius_control),
+            palette.media_fill,
+        );
     }
     painter.text(
         rect.center(),
@@ -540,7 +592,11 @@ fn colour_button(
         Sense::click(),
     );
     if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(RADIUS_SMALL), palette.media_fill);
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::ui().radius_control),
+            palette.media_fill,
+        );
     }
     paint_colour_swatch(painter, palette, rect.center(), target, current);
     response

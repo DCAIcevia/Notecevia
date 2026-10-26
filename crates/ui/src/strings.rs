@@ -27,11 +27,10 @@ pub const BOARD_HINT: &str = "双击空白开始写 · 拖入图片/视频/音�
 
 /// 空画板的引导：一句下一步，加一行快捷键。
 pub const EMPTY_BOARD: &str = "双击空白开始写";
-pub const EMPTY_BOARD_HINT: &str = "也可以把图片、视频、音频直接拖进来";
+pub const EMPTY_BOARD_HINT: &str = "拖入图片、视频、音频";
 
-/// 选中块后工具条上的动作。
+/// 选中块后工具条上的动作。删除不在这里：只走键盘 Delete。
 pub const DUPLICATE: &str = "复制";
-pub const DELETE: &str = "删除";
 pub const LOCK: &str = "锁定";
 pub const UNLOCK: &str = "解锁";
 pub const HIDE: &str = "隐藏";
@@ -97,17 +96,17 @@ pub const HOME_EXPORT: &str = "导出";
 pub const HOME_EXPORT_CONTAINER: &str = "导出容器";
 pub const HOME_EXPORT_HTML: &str = "导出 HTML";
 pub const HOME_SEARCH_HINT: &str = "搜索标题、标签与正文";
-pub const HOME_EMPTY: &str = "还没有画板";
-pub const HOME_EMPTY_HINT: &str = "点「新建画板」开始，先把第一块内容放上画布";
-pub const HOME_NO_RESULTS: &str = "没有匹配的画板";
+pub const HOME_EMPTY: &str = "还没有笔记";
+pub const HOME_EMPTY_HINT: &str = "点右上角 ＋ 新建";
+pub const HOME_NO_RESULTS: &str = "没有匹配的笔记";
 pub const HOME_NO_RESULTS_HINT: &str = "换个词试试，或者清空搜索";
 pub const HOME_TAGS: &str = "标签";
 pub const HOME_ADD_TAG: &str = "加标签";
 pub const HOME_TAG_FILTER: &str = "按标签筛选";
-pub const HOME_CONFIRM_DELETE: &str = "删掉这张画板？内容会移进回收站，可以手动找回";
+pub const HOME_CONFIRM_DELETE: &str = "删掉这条笔记？内容会移进回收站，可以手动找回";
 pub const HOME_CANCEL: &str = "取消";
 pub const HOME_CONFIRM: &str = "确认删除";
-pub const HOME_UNTITLED: &str = "未命名画板";
+pub const HOME_UNTITLED: &str = "未命名笔记";
 pub const HOME_BLOCK_COUNT: &str = "块";
 pub const HOME_UPDATED_JUST_NOW: &str = "刚更新";
 pub const HOME_UPDATED_TODAY: &str = "今天更新";
@@ -115,12 +114,12 @@ pub const HOME_UPDATED_YESTERDAY: &str = "昨天更新";
 pub const HOME_UPDATED_DAYS: &str = "天前更新";
 
 /// 首页操作之后的状态。
-pub const BOARD_CREATED: &str = "已新建画板";
-pub const BOARD_DELETED: &str = "画板已移进回收站";
+pub const BOARD_CREATED: &str = "已新建笔记";
+pub const BOARD_DELETED: &str = "笔记已移进回收站";
 pub const BOARD_RENAMED: &str = "已重命名";
 pub const TAGS_SAVED: &str = "标签已保存";
 pub const EXPORTED: &str = "已导出";
-pub const IMPORTED: &str = "已导入画板";
+pub const IMPORTED: &str = "已导入笔记";
 pub const RECOVERED: &str = "上次没写完的临时文件已清理";
 
 pub fn export_failed(error: impl std::fmt::Display) -> String {
@@ -165,3 +164,77 @@ pub const HOME_FILTER_ALL: &str = "全部";
 /// 首页刷新列表。
 pub const HOME_REFRESH: &str = "刷新";
 pub const REFRESHED: &str = "列表已刷新";
+
+/// 外壳：应用名。
+pub const BRAND: &str = "Notecevia";
+/// 外壳：搜索框占位。
+pub const SHELL_SEARCH: &str = "搜索";
+/// 外壳：收起左侧边栏。
+pub const SHELL_TOGGLE_LIST: &str = "收起左侧边栏";
+/// 外壳：收起资源栏。
+pub const SHELL_TOGGLE_ASSETS: &str = "收起资源栏";
+/// 外壳：没有打开的笔记。
+pub const SHELL_NO_NOTE: &str = "还没有打开的笔记";
+/// 外壳：新建笔记。
+pub const SHELL_NEW_NOTE: &str = "新建笔记";
+/// 资源栏：没有资源时的拖入提示。
+pub const ASSETS_DROP: &str = "拖入文件";
+
+/// 画布栏：新建块按钮的无障碍标签。
+pub const NEW_BLOCK: &str = "新建块";
+/// 画布栏上的缩放百分比。数字等宽，缩放时不左右跳。
+pub fn zoom_percent(zoom: f32) -> String {
+    format!("{:.0}%", zoom * 100.0)
+}
+
+/// 左侧边栏：新建按钮的无障碍标签。
+pub const SIDEBAR_NEW: &str = "新建笔记";
+/// 左侧边栏行里的相对时间。界面拿不到本地时区，所以只写相对时刻。
+pub const SIDEBAR_TIME_JUST_NOW: &str = "刚刚";
+pub const SIDEBAR_TIME_MINUTES: &str = "分钟前";
+pub const SIDEBAR_TIME_HOURS: &str = "小时前";
+pub const SIDEBAR_TIME_YESTERDAY: &str = "昨天";
+pub const SIDEBAR_TIME_DAYS: &str = "天前";
+/// 左侧边栏：标签输入框的提示与标签之间的分隔符。
+pub const SIDEBAR_TAGS_HINT: &str = "标签，逗号分开";
+pub const TAG_SEPARATOR: char = '，';
+
+/// 新建笔记的默认标题。
+pub const UNTITLED_NOTE: &str = "无标题笔记";
+
+/// 已经开着一张空笔记时再点新建。
+pub const BOARD_ALREADY_EMPTY: &str = "已经是空笔记了";
+
+/// 菜单栏：菜单名。
+pub const MENU_FILE: &str = "文件";
+pub const MENU_EDIT: &str = "编辑";
+pub const MENU_SELECT: &str = "选择";
+pub const MENU_VIEW: &str = "视图";
+pub const MENU_HELP: &str = "帮助";
+
+/// 菜单栏：菜单项。
+pub const MENU_NEW_NOTE: &str = "新建笔记";
+pub const MENU_EXPORT_HTML: &str = "导出 HTML";
+pub const MENU_EXPORT_CONTAINER: &str = "导出容器";
+pub const MENU_CLOSE_NOTE: &str = "关闭笔记";
+pub const MENU_QUIT: &str = "退出";
+pub const MENU_UNDO: &str = "撤销";
+pub const MENU_REDO: &str = "重做";
+pub const MENU_DELETE: &str = "删除选中的块";
+pub const MENU_SELECT_ALL: &str = "全选";
+pub const MENU_CLEAR_SELECT: &str = "取消选择";
+pub const MENU_HIDE_LIST: &str = "收起左侧边栏";
+pub const MENU_HIDE_ASSETS: &str = "收起资源栏";
+pub const MENU_ABOUT: &str = "关于 Notecevia";
+
+/// 关于：只在状态行显示一次。
+pub fn about() -> String {
+    format!("Notecevia {}", crate::version())
+}
+
+/// 左侧栏的三种视图。
+pub const SHELL_VIEW_PAGE: &str = "页";
+pub const SHELL_VIEW_VOLUME: &str = "册";
+pub const SHELL_VIEW_SHELF: &str = "书架";
+/// 还没做的东西，悬停时说清楚，别让人以为点了没反应是坏了。
+pub const SHELL_NOT_YET: &str = "还没做";
