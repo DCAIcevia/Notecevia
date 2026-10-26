@@ -4,17 +4,22 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
 use notecevia_core::{BlockKind, Document};
 use notecevia_store::Workspace;
-use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp};
+use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
 use notecevia_ui::media::MediaSource;
 use notecevia_ui::{BoardApp, strings};
 
 /// 自动保存的间隔，秒。改动一直在就按这个节奏落盘。
 const AUTOSAVE_SECONDS: f64 = 2.0;
+/// 缩略图最短刷新间隔，秒。自动保存很频繁，图不必每次都重画。
+const THUMBNAIL_SECONDS: f64 = 5.0;
+/// 缩略图宽度，像素。
+const THUMBNAIL_WIDTH: u32 = 320;
 
 /// 按内容哈希读媒体。界面只拿字节，路径校验留在这里。
 struct DiskMedia {
@@ -27,6 +32,17 @@ impl MediaSource for DiskMedia {
             return None;
         }
         std::fs::read(self.dir.join(hash)).ok()
+    }
+}
+
+/// 首页要缩略图时才去读盘，不把一万张图塞进内存。
+struct DiskThumbnails {
+    dir: PathBuf,
+}
+
+impl ThumbnailSource for DiskThumbnails {
+    fn thumbnail(&self, board_id: u64, _updated_at: i64) -> Option<Vec<u8>> {
+        std::fs::read(self.dir.join(format!("{board_id}.png"))).ok()
     }
 }
 
@@ -43,6 +59,18 @@ struct App {
     /// 给了路径就截一张图再退出，用来在没有显示器的地方检查界面。
     shot: Option<PathBuf>,
     frames: u32,
+    /// 截图回调把结果放这里，下一帧取走。外层是「完成了一次」，内层是可选的提示。
+    capture: Arc<Mutex<Option<Option<String>>>>,
+    /// 有截图在飞，避免同一帧重复请求。
+    capture_busy: bool,
+    /// 这次保存之后该重画缩略图。
+    want_thumbnail: bool,
+    /// 上一次重画缩略图的时间。
+    last_thumbnail_at: f64,
+    /// 开发检查用：跑起来先存一次盘，确认缩略图真的会生成。
+    thumbnail_check: bool,
+    /// 开发检查用：跑起来截一张当前画布，确认导出图片的链路通。
+    image_check: bool,
 }
 
 impl App {
@@ -56,6 +84,12 @@ impl App {
             last_autosave: 0.0,
             shot,
             frames: 0,
+            capture: Arc::new(Mutex::new(None)),
+            capture_busy: false,
+            want_thumbnail: false,
+            last_thumbnail_at: f64::NEG_INFINITY,
+            thumbnail_check: false,
+            image_check: false,
         }
     }
 
@@ -84,6 +118,7 @@ impl App {
                     board.mark_saved();
                     board.set_status(strings::SAVED);
                 }
+                self.want_thumbnail = true;
             }
             Err(error) => self.status(strings::save_failed(error)),
         }
@@ -118,6 +153,7 @@ impl App {
                 self.board = Some(BoardApp::new(document, Box::new(media)));
                 self.board_id = id;
                 self.last_autosave = 0.0;
+                self.last_thumbnail_at = f64::NEG_INFINITY;
             }
             Err(error) => {
                 let message = strings::open_failed(error);
@@ -150,6 +186,7 @@ impl App {
         self.board = Some(BoardApp::new(Document::new("画板"), Box::new(media)));
         self.board_id = id;
         self.last_autosave = 0.0;
+        self.last_thumbnail_at = f64::NEG_INFINITY;
         self.save();
         self.status(strings::BOARD_CREATED);
     }
@@ -407,11 +444,111 @@ impl App {
         self.last_autosave = now;
         self.save();
     }
+
+    /// 把截图回调的结果取回来，顺手清掉在飞标记。
+    fn take_capture_result(&mut self) {
+        let outcome = self.capture.lock().ok().and_then(|mut slot| slot.take());
+        let Some(message) = outcome else {
+            return;
+        };
+        self.capture_busy = false;
+        if let Some(message) = message {
+            self.status(message);
+        }
+    }
+
+    /// 画布顶栏点了「导出图片」：截当前画布，存到工作区的 exports/。
+    fn handle_image_export(&mut self, ctx: &egui::Context) {
+        if self.shot.is_some() || self.capture_busy {
+            return;
+        }
+        let Some(board) = self.board.as_mut() else {
+            return;
+        };
+        if !board.take_image_export_request() {
+            return;
+        }
+        let rect = board.canvas_rect();
+        let title = board.document().board.title.clone();
+        let Some(dir) = self.workspace.as_ref().map(|it| it.root().join("exports")) else {
+            return;
+        };
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            self.status(strings::export_failed(error));
+            return;
+        }
+        let path = dir.join(format!("{}-{}.png", slug(&title), self.board_id));
+        self.status(strings::EXPORTING);
+        self.request_capture(ctx, path, rect, None, true);
+    }
+
+    /// 保存之后顺手重画一张缩略图，首页列表直接读它。
+    fn maybe_capture_thumbnail(&mut self, ctx: &egui::Context) {
+        if !self.want_thumbnail || self.capture_busy {
+            return;
+        }
+        if self.shot.is_some() && !self.thumbnail_check {
+            return;
+        }
+        let Some(board) = self.board.as_ref() else {
+            self.want_thumbnail = false;
+            return;
+        };
+        if board.is_dirty() {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        if now - self.last_thumbnail_at < THUMBNAIL_SECONDS {
+            return;
+        }
+        let rect = board.canvas_rect();
+        let Some(dir) = self
+            .workspace
+            .as_ref()
+            .map(|it| it.root().join("thumbnails"))
+        else {
+            return;
+        };
+        self.want_thumbnail = false;
+        self.last_thumbnail_at = now;
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let path = dir.join(format!("{}.png", self.board_id));
+        self.request_capture(ctx, path, rect, Some(THUMBNAIL_WIDTH), false);
+    }
+
+    /// 请求一帧截图，按给定画布矩形裁剪后写成 PNG。
+    fn request_capture(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        rect: egui::Rect,
+        max_width: Option<u32>,
+        announce: bool,
+    ) {
+        let pixels_per_point = ctx.pixels_per_point();
+        let slot = Arc::clone(&self.capture);
+        let display = path.display().to_string();
+        self.capture_busy = true;
+        ctx.request_screenshot(move |image| {
+            let outcome = save_cropped_png(&path, &image, rect, pixels_per_point, max_width);
+            let message = match outcome {
+                Ok(()) if announce => Some(strings::image_exported(display)),
+                Ok(()) => None,
+                Err(error) => Some(strings::export_failed(error)),
+            };
+            if let Ok(mut slot) = slot.lock() {
+                *slot = Some(message);
+            }
+        });
+    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.take_capture_result();
         if self.board.is_some() {
             if let Some(board) = self.board.as_mut() {
                 board.ui(ui);
@@ -419,6 +556,9 @@ impl eframe::App for App {
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::S)) {
                 self.save();
             }
+            self.autosave(&ctx);
+            self.handle_image_export(&ctx);
+            self.maybe_capture_thumbnail(&ctx);
             if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N)) {
                 self.create_board();
             }
@@ -427,7 +567,6 @@ impl eframe::App for App {
             }
             self.open_media_request();
             self.handle_dropped_files(&ctx);
-            self.autosave(&ctx);
             let home_requested = self
                 .board
                 .as_mut()
@@ -451,6 +590,17 @@ impl eframe::App for App {
         };
         self.frames += 1;
         ctx.request_repaint();
+        if self.frames == 10 && self.thumbnail_check {
+            self.save();
+        }
+        if self.frames == 15 && self.image_check {
+            let rect = self.board.as_ref().map(BoardApp::canvas_rect);
+            let dir = self.workspace.as_ref().map(|it| it.root().join("exports"));
+            if let (Some(rect), Some(dir)) = (rect, dir) {
+                let _ = std::fs::create_dir_all(&dir);
+                self.request_capture(&ctx, dir.join("export-check.png"), rect, None, true);
+            }
+        }
         if self.frames == 25 {
             ctx.request_screenshot(move |image| save_png(&path, &image));
         }
@@ -484,6 +634,8 @@ fn main() -> eframe::Result {
     let mut edit = false;
     let mut select = false;
     let mut home = false;
+    let mut thumbnail_check = false;
+    let mut image_check = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -493,6 +645,8 @@ fn main() -> eframe::Result {
             Some("--edit") => edit = true,
             Some("--select") => select = true,
             Some("--home") => home = true,
+            Some("--thumbnail") => thumbnail_check = true,
+            Some("--export-image") => image_check = true,
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -515,10 +669,15 @@ fn main() -> eframe::Result {
 
             let root = notecevia_store::workspace_root();
             let mut app = App::new(shot.clone());
+            app.thumbnail_check = thumbnail_check;
+            app.image_check = image_check;
             match Workspace::open(&root) {
                 Ok(workspace) => {
                     let recovered = workspace.recover().unwrap_or(0);
                     app.workspace = Some(workspace);
+                    app.home = HomeApp::with_thumbnails(Box::new(DiskThumbnails {
+                        dir: root.join("thumbnails"),
+                    }));
                     app.can_save = true;
                     app.refresh_boards();
                     if recovered > 0 {
@@ -611,6 +770,54 @@ fn open_with_system(path: &Path) -> std::io::Result<()> {
     {
         Command::new("xdg-open").arg(path).spawn().map(|_| ())
     }
+}
+
+/// 把整窗截图切成画布那块，按需缩小，写成 PNG。
+fn save_cropped_png(
+    path: &Path,
+    image: &egui::ColorImage,
+    rect: egui::Rect,
+    pixels_per_point: f32,
+    max_width: Option<u32>,
+) -> std::io::Result<()> {
+    let [width, height] = image.size;
+    if width == 0 || height == 0 {
+        return Err(std::io::Error::other("截图是空的"));
+    }
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for pixel in &image.pixels {
+        rgba.extend_from_slice(&pixel.to_srgba_unmultiplied());
+    }
+    let Some(full) = image::RgbaImage::from_raw(width as u32, height as u32, rgba) else {
+        return Err(std::io::Error::other("截图像素数量不对"));
+    };
+    let to_pixel = |value: f32, limit: usize| -> u32 {
+        (value * pixels_per_point).round().clamp(0.0, limit as f32) as u32
+    };
+    let left = to_pixel(rect.min.x, width);
+    let top = to_pixel(rect.min.y, height);
+    let right = to_pixel(rect.max.x, width);
+    let bottom = to_pixel(rect.max.y, height);
+    let crop_width = right.saturating_sub(left).max(1);
+    let crop_height = bottom.saturating_sub(top).max(1);
+    let mut cropped =
+        image::imageops::crop_imm(&full, left, top, crop_width, crop_height).to_image();
+    if let Some(max_width) = max_width
+        && cropped.width() > max_width
+    {
+        let ratio = max_width as f32 / cropped.width() as f32;
+        let target_height = ((cropped.height() as f32) * ratio).round().max(1.0) as u32;
+        cropped = image::imageops::resize(
+            &cropped,
+            max_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    cropped.save(path).map_err(std::io::Error::other)
 }
 
 fn save_png(path: &std::path::Path, image: &egui::ColorImage) {
