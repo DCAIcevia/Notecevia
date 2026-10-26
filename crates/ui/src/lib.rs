@@ -11,7 +11,7 @@ pub mod strings;
 pub mod theme;
 
 pub use board::BoardApp;
-pub use home::{BoardItem, ExportKind, HomeAction, HomeApp};
+pub use home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
 pub use media::MediaSource;
 
 use notecevia_core::version;

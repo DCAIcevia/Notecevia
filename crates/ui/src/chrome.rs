@@ -29,9 +29,10 @@ const RADIUS_SMALL: u8 = 4;
 pub struct TopBarOutput {
     pub home: bool,
     pub new_kind: Option<BlockKind>,
+    pub export_image: bool,
 }
 
-/// 顶栏：左边返回与新建，中间画板名，右边保存状态。
+/// 顶栏：左边返回、新建与导出图片，中间画板名，右边保存状态。
 pub fn top_bar(
     ui: &mut egui::Ui,
     palette: &theme::Palette,
@@ -51,6 +52,7 @@ pub fn top_bar(
     let mut output = TopBarOutput {
         home: false,
         new_kind: None,
+        export_image: false,
     };
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -78,6 +80,9 @@ pub fn top_bar(
                 .flatten();
             if picked.is_some() {
                 output.new_kind = picked;
+            }
+            if ui.button(strings::EXPORT_IMAGE).clicked() {
+                output.export_image = true;
             }
 
             ui.add_space(2.0);

@@ -1,14 +1,16 @@
 #![forbid(unsafe_code)]
 
-//! 首页：画板列表、搜索、标签与导出入口。
+//! 首页：画板列表、搜索、标签筛选、缩略图与导出入口。
 //!
 //! 首页只产出一个动作，由 app 执行真正的读写。这样界面层不用碰文件。
 
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use egui::{
-    Align, Align2, Button, CornerRadius, FontId, Key, Label, Layout, Margin, Rect, RichText, Sense,
-    Shape, TextEdit, TextWrapMode, Ui, pos2, text::LayoutJob, text::TextFormat, vec2,
+    Align, Align2, Button, Color32, CornerRadius, FontId, Key, Label, Layout, Margin, Rect,
+    RichText, Sense, Shape, TextEdit, TextWrapMode, TextureHandle, TextureOptions, Ui, Vec2, pos2,
+    text::LayoutJob, text::TextFormat, vec2,
 };
 
 use crate::{strings, theme};
@@ -26,6 +28,14 @@ const PAGE_MARGIN_Y: i8 = 16;
 const ROW_GAP: f32 = 2.0;
 const JUST_NOW_SECS: i64 = 60;
 const DAY_SECS: i64 = 86_400;
+const THUMB_WIDTH: f32 = 56.0;
+const THUMB_HEIGHT: f32 = 40.0;
+const THUMB_RADIUS: u8 = 4;
+const THUMB_GAP: f32 = 10.0;
+/// 缩略图解码后最长边压到这个像素数，纹理内存才有上限。
+const MAX_THUMBNAIL_SIDE: u32 = 128;
+/// 纹理缓存条数上限；滚过很多画板时不会无限堆积。
+const MAX_CACHED_THUMBNAILS: usize = 256;
 
 /// 列表里的一张画板。
 #[derive(Clone, Debug, PartialEq)]
@@ -60,16 +70,36 @@ pub enum ExportKind {
     Html,
 }
 
+/// 首页按需取缩略图的来源，返回 PNG 字节。
+///
+/// 做成 trait 而不是往 BoardItem 里塞字节：列表只保留解码后的纹理缓存，
+/// 不把一万张图背在内存里。取不到就返回 None，界面画占位。
+pub trait ThumbnailSource {
+    fn thumbnail(&self, board_id: u64, updated_at: i64) -> Option<Vec<u8>>;
+}
+
+/// 不需要缩略图时的默认来源。
+impl ThumbnailSource for () {
+    fn thumbnail(&self, _board_id: u64, _updated_at: i64) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 /// 首页状态：列表、搜索词、待确认的删除、正在编辑的标题。
 pub struct HomeApp {
     boards: Vec<BoardItem>,
     state: HomeState,
+    thumbnails: Box<dyn ThumbnailSource>,
+    /// 按 (画板 id, 更新时间) 缓存解码后的纹理；None 表示取过但没图/解码失败。
+    textures: HashMap<(u64, i64), Option<TextureHandle>>,
 }
 
 /// 跟列表内容无关的交互状态。
 #[derive(Default)]
 struct HomeState {
     search: String,
+    /// 选中的标签筛选；空表示不筛，多选按交集。
+    filter: Vec<String>,
     pending_delete: Option<u64>,
     editing: Option<(u64, String)>,
     status: Option<String>,
@@ -89,9 +119,16 @@ struct HomeState {
 
 impl HomeApp {
     pub fn new() -> Self {
+        Self::with_thumbnails(Box::new(()))
+    }
+
+    /// 用给定的缩略图来源建首页；new 用不提供缩略图的默认来源。
+    pub fn with_thumbnails(source: Box<dyn ThumbnailSource>) -> Self {
         Self {
             boards: Vec::new(),
             state: HomeState::default(),
+            thumbnails: source,
+            textures: HashMap::new(),
         }
     }
 
@@ -112,6 +149,15 @@ impl HomeApp {
         {
             state.editing = None;
         }
+
+        // 画板改名/更新后旧纹理不再对应，顺手丢掉；搜索换了结果集也会收窄。
+        let latest: HashMap<u64, i64> = self
+            .boards
+            .iter()
+            .map(|board| (board.id, board.updated_at))
+            .collect();
+        self.textures
+            .retain(|&(id, updated_at), _| latest.get(&id) == Some(&updated_at));
     }
 
     pub fn set_status(&mut self, status: impl Into<String>) {
@@ -126,8 +172,18 @@ impl HomeApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<HomeAction> {
         let palette = theme::palette(ui.visuals().dark_mode);
         let mut action = None;
-        let Self { boards, state } = self;
+        let Self {
+            boards,
+            state,
+            thumbnails,
+            textures,
+        } = self;
         state.typing = false;
+        let mut thumbs = ThumbnailCache {
+            source: thumbnails.as_ref(),
+            textures,
+        };
+        let now = now_secs();
 
         egui::Frame::new()
             .inner_margin(Margin::symmetric(PAGE_MARGIN_X, PAGE_MARGIN_Y))
@@ -137,12 +193,21 @@ impl HomeApp {
                     action = Some(chosen);
                 }
                 status_line(state, ui, &palette);
+                filter_bar(state, ui, &palette, boards);
                 ui.add_space(8.0);
+
+                let visible = filtered_boards(boards, &state.filter);
+                if state
+                    .selected
+                    .is_some_and(|id| !visible.iter().any(|board| board.id == id))
+                {
+                    state.selected = None;
+                }
 
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if boards.is_empty() {
+                        if visible.is_empty() {
                             if let Some(chosen) = placeholder(state, ui, &palette)
                                 && action.is_none()
                             {
@@ -150,9 +215,9 @@ impl HomeApp {
                             }
                             return;
                         }
-                        let now = now_secs();
-                        for board in boards.iter() {
-                            if let Some(chosen) = board_row(state, ui, &palette, board, now)
+                        for board in &visible {
+                            if let Some(chosen) =
+                                board_row(state, ui, &palette, board, now, &mut thumbs)
                                 && action.is_none()
                             {
                                 action = Some(chosen);
@@ -161,7 +226,7 @@ impl HomeApp {
                         }
                     });
 
-                handle_keys(state, boards, ui, &mut action);
+                handle_keys(state, &visible, ui, &mut action);
             });
 
         action
@@ -219,16 +284,111 @@ fn status_line(state: &HomeState, ui: &mut Ui, palette: &theme::Palette) {
     );
 }
 
+/// 列表上方的一行标签筛选。多选按交集，再点一次取消。
+fn filter_bar(state: &mut HomeState, ui: &mut Ui, palette: &theme::Palette, boards: &[BoardItem]) {
+    let tags = all_tags(boards);
+    if tags.is_empty() && state.filter.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(strings::HOME_TAG_FILTER)
+                .size(theme::SMALL_FONT)
+                .color(palette.muted),
+        );
+        if filter_chip(
+            ui,
+            palette,
+            strings::HOME_FILTER_ALL,
+            state.filter.is_empty(),
+        ) {
+            state.filter.clear();
+        }
+        for tag in &tags {
+            let active = state.filter.iter().any(|selected| selected == tag);
+            if filter_chip(ui, palette, tag, active) {
+                if active {
+                    state.filter.retain(|selected| selected != tag);
+                } else {
+                    state.filter.push(tag.clone());
+                }
+            }
+        }
+        if !state.filter.is_empty() && filter_chip(ui, palette, strings::HOME_FILTER_CLEAR, false) {
+            state.filter.clear();
+        }
+    });
+    ui.add_space(4.0);
+}
+
+/// 可点的筛选标签片。active 时反色，表示这个标签正在生效。
+fn filter_chip(ui: &mut Ui, palette: &theme::Palette, text: &str, active: bool) -> bool {
+    let font = FontId::proportional(theme::SMALL_FONT);
+    let color = if active {
+        palette.canvas
+    } else {
+        palette.muted
+    };
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let size = vec2(galley.size().x + CHIP_PAD * 2.0, CHIP_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let fill = if active {
+        palette.text
+    } else if response.hovered() {
+        palette.hover_edge
+    } else {
+        palette.block_fill
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(CHIP_RADIUS), fill);
+    let text_pos = pos2(
+        rect.left() + CHIP_PAD,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    ui.painter().galley(text_pos, galley, color);
+    response.clicked()
+}
+
+/// 所有画板标签按首次出现顺序去重汇总。
+fn all_tags(boards: &[BoardItem]) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for board in boards {
+        for tag in &board.tags {
+            if !tags.iter().any(|existing| existing == tag) {
+                tags.push(tag.clone());
+            }
+        }
+    }
+    tags
+}
+
+/// 按选中的标签筛画板：多选取交集，空筛选全过。
+fn filtered_boards<'a>(boards: &'a [BoardItem], filter: &[String]) -> Vec<&'a BoardItem> {
+    boards
+        .iter()
+        .filter(|board| matches_filter(&board.tags, filter))
+        .collect()
+}
+
+fn matches_filter(tags: &[String], filter: &[String]) -> bool {
+    filter
+        .iter()
+        .all(|wanted| tags.iter().any(|tag| tag == wanted))
+}
+
 /// 空态与无结果态。两种情况都给下一步。
 fn placeholder(state: &mut HomeState, ui: &mut Ui, palette: &theme::Palette) -> Option<HomeAction> {
     let searching = !state.search.trim().is_empty();
+    let filtering = !state.filter.is_empty();
+    let empty = !searching && !filtering;
     let mut action = None;
     ui.add_space(40.0);
     ui.vertical_centered(|ui| {
-        let (title, hint) = if searching {
-            (strings::HOME_NO_RESULTS, strings::HOME_NO_RESULTS_HINT)
-        } else {
+        let (title, hint) = if empty {
             (strings::HOME_EMPTY, strings::HOME_EMPTY_HINT)
+        } else {
+            (strings::HOME_NO_RESULTS, strings::HOME_NO_RESULTS_HINT)
         };
         ui.label(
             RichText::new(title)
@@ -242,10 +402,18 @@ fn placeholder(state: &mut HomeState, ui: &mut Ui, palette: &theme::Palette) -> 
                 .color(palette.muted),
         );
         ui.add_space(14.0);
-        // 无结果时下一步是改词或清空搜索：搜索框右侧的 × 就在这一屏里。
-        if !searching && ui.button(strings::HOME_NEW).clicked() {
-            action = Some(HomeAction::Create);
-        }
+        ui.horizontal(|ui| {
+            if empty && ui.button(strings::HOME_NEW).clicked() {
+                action = Some(HomeAction::Create);
+            }
+            if filtering && ui.button(strings::HOME_FILTER_CLEAR).clicked() {
+                state.filter.clear();
+            }
+            if searching && ui.button(strings::HOME_CLEAR_SEARCH).clicked() {
+                state.search.clear();
+                action = Some(HomeAction::Search(String::new()));
+            }
+        });
     });
     action
 }
@@ -256,6 +424,7 @@ fn board_row(
     palette: &theme::Palette,
     board: &BoardItem,
     now: i64,
+    thumbs: &mut ThumbnailCache<'_>,
 ) -> Option<HomeAction> {
     let selected = state.selected == Some(board.id);
     let confirming = state.pending_delete == Some(board.id);
@@ -274,7 +443,9 @@ fn board_row(
                 .inner_margin(Margin::symmetric(ROW_PAD_X, ROW_PAD_Y))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                        thumbnail_cell(ui, palette, thumbs, board);
+                        ui.add_space(THUMB_GAP);
                         let content_width = (ui.available_width() - ACTION_WIDTH - 8.0).max(120.0);
                         ui.allocate_ui_with_layout(
                             vec2(content_width, 0.0),
@@ -335,6 +506,98 @@ fn board_row(
     }
 
     action
+}
+
+/// 只保留已解码纹理的缩略图缓存；来源按 (id, updated_at) 取字节。
+struct ThumbnailCache<'a> {
+    source: &'a dyn ThumbnailSource,
+    textures: &'a mut HashMap<(u64, i64), Option<TextureHandle>>,
+}
+
+impl ThumbnailCache<'_> {
+    fn texture(&mut self, ctx: &egui::Context, board: &BoardItem) -> Option<TextureHandle> {
+        let key = (board.id, board.updated_at);
+        if let Some(cached) = self.textures.get(&key) {
+            return cached.clone();
+        }
+        let texture = self
+            .source
+            .thumbnail(board.id, board.updated_at)
+            .and_then(|bytes| rgba_thumbnail(&bytes))
+            .map(|(size, rgba)| {
+                let image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
+                ctx.load_texture(
+                    format!("home-thumb-{}-{}", board.id, board.updated_at),
+                    image,
+                    TextureOptions::LINEAR,
+                )
+            });
+        // 没图或解码失败也记一条，避免每帧重试。
+        if texture.is_some() && self.textures.len() >= MAX_CACHED_THUMBNAILS {
+            let stale = self.textures.keys().find(|cached| **cached != key).copied();
+            if let Some(stale) = stale {
+                self.textures.remove(&stale);
+            }
+        }
+        self.textures.insert(key, texture.clone());
+        texture
+    }
+}
+
+/// 行首缩略图。没图、解码失败或不在视野内都画占位，不阻塞列表。
+fn thumbnail_cell(
+    ui: &mut Ui,
+    palette: &theme::Palette,
+    thumbs: &mut ThumbnailCache<'_>,
+    board: &BoardItem,
+) {
+    let (rect, _) = ui.allocate_exact_size(vec2(THUMB_WIDTH, THUMB_HEIGHT), Sense::hover());
+    // 不在视野里的行不取图、不解码，滚到哪才加载哪。
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let radius = CornerRadius::same(THUMB_RADIUS);
+    ui.painter().rect_filled(rect, radius, palette.media_fill);
+    let Some(texture) = thumbs.texture(ui.ctx(), board) else {
+        return;
+    };
+    let uv = cover_uv(texture.size_vec2(), rect.size());
+    ui.painter().image(texture.id(), rect, uv, Color32::WHITE);
+}
+
+/// 解码 PNG，并把最长边压到 MAX_THUMBNAIL_SIDE，纹理内存才有上限。
+fn rgba_thumbnail(bytes: &[u8]) -> Option<([usize; 2], Vec<u8>)> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+    let image = if image.width() > MAX_THUMBNAIL_SIDE || image.height() > MAX_THUMBNAIL_SIDE {
+        image.thumbnail(MAX_THUMBNAIL_SIDE, MAX_THUMBNAIL_SIDE)
+    } else {
+        image
+    };
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    if size[0] == 0 || size[1] == 0 {
+        return None;
+    }
+    Some((size, rgba.as_raw().clone()))
+}
+
+/// 按 cover 方式裁 UV：图比框宽就裁左右，比框高就裁上下。
+fn cover_uv(image: Vec2, target: Vec2) -> Rect {
+    let image_aspect = image.x / image.y;
+    let target_aspect = target.x / target.y;
+    if image_aspect > target_aspect {
+        let width = target_aspect / image_aspect;
+        Rect::from_min_max(
+            pos2((1.0 - width) / 2.0, 0.0),
+            pos2((1.0 + width) / 2.0, 1.0),
+        )
+    } else {
+        let height = image_aspect / target_aspect;
+        Rect::from_min_max(
+            pos2(0.0, (1.0 - height) / 2.0),
+            pos2(1.0, (1.0 + height) / 2.0),
+        )
+    }
 }
 
 fn row_content(
@@ -719,7 +982,7 @@ where
 
 fn handle_keys(
     state: &mut HomeState,
-    boards: &[BoardItem],
+    visible: &[&BoardItem],
     ui: &Ui,
     action: &mut Option<HomeAction>,
 ) {
@@ -729,7 +992,7 @@ fn handle_keys(
         return;
     }
     // 在文本框里打字时，方向键是移光标，不是选行。
-    if state.typing || state.editing.is_some() || boards.is_empty() {
+    if state.typing || state.editing.is_some() || visible.is_empty() {
         return;
     }
     let (up, down, enter) = ui.input(|input| {
@@ -740,10 +1003,10 @@ fn handle_keys(
         )
     });
     if up {
-        step_selection(state, boards, -1);
+        step_selection(state, visible, -1);
     }
     if down {
-        step_selection(state, boards, 1);
+        step_selection(state, visible, 1);
     }
     if enter
         && action.is_none()
@@ -753,21 +1016,21 @@ fn handle_keys(
     }
 }
 
-fn step_selection(state: &mut HomeState, boards: &[BoardItem], delta: isize) {
+fn step_selection(state: &mut HomeState, visible: &[&BoardItem], delta: isize) {
     let current = state
         .selected
-        .and_then(|id| boards.iter().position(|board| board.id == id));
+        .and_then(|id| visible.iter().position(|board| board.id == id));
     let next = match current {
-        Some(index) => (index as isize + delta).clamp(0, boards.len() as isize - 1) as usize,
+        Some(index) => (index as isize + delta).clamp(0, visible.len() as isize - 1) as usize,
         None => {
             if delta > 0 {
                 0
             } else {
-                boards.len() - 1
+                visible.len() - 1
             }
         }
     };
-    let id = boards[next].id;
+    let id = visible[next].id;
     if state.selected != Some(id) {
         state.tag_draft.clear();
     }
@@ -819,5 +1082,122 @@ mod tests {
         );
         assert_eq!(highlight_ranges("没有命中", "画板"), Vec::new());
         assert_eq!(highlight_ranges("abc", ""), Vec::new());
+    }
+
+    fn board(id: u64, tags: &[&str]) -> BoardItem {
+        BoardItem {
+            id,
+            title: String::new(),
+            tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
+            snippet: None,
+            updated_at: 0,
+            entry_count: 0,
+        }
+    }
+
+    #[test]
+    fn filter_intersects_selected_tags() {
+        let tags = vec!["a".to_owned(), "b".to_owned()];
+        assert!(matches_filter(&tags, &[]));
+        assert!(matches_filter(&tags, &["a".to_owned()]));
+        assert!(matches_filter(&tags, &["a".to_owned(), "b".to_owned()]));
+        assert!(!matches_filter(&tags, &["a".to_owned(), "c".to_owned()]));
+    }
+
+    #[test]
+    fn all_tags_keeps_first_seen_order() {
+        let boards = vec![board(1, &["b", "a"]), board(2, &["a", "c"])];
+        assert_eq!(
+            all_tags(&boards),
+            vec!["b".to_owned(), "a".to_owned(), "c".to_owned()]
+        );
+    }
+
+    #[test]
+    fn cover_uv_crops_only_the_long_side() {
+        let wide = cover_uv(Vec2::new(200.0, 100.0), Vec2::new(56.0, 40.0));
+        assert!(wide.width() < 1.0);
+        assert_eq!(wide.height(), 1.0);
+        let tall = cover_uv(Vec2::new(100.0, 200.0), Vec2::new(56.0, 40.0));
+        assert!(tall.height() < 1.0);
+        assert_eq!(tall.width(), 1.0);
+    }
+
+    #[test]
+    fn thumbnail_png_decodes_and_downscales() {
+        let source = image::RgbaImage::from_pixel(320, 200, image::Rgba([9, 8, 7, 255]));
+        let mut bytes = Vec::new();
+        source
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode png");
+        let (size, rgba) = rgba_thumbnail(&bytes).expect("decode png");
+        assert!(size[0] <= MAX_THUMBNAIL_SIDE as usize);
+        assert!(size[1] <= MAX_THUMBNAIL_SIDE as usize);
+        assert_eq!(rgba.len(), size[0] * size[1] * 4);
+        assert!(rgba_thumbnail(b"not a png").is_none());
+    }
+
+    struct CountingSource {
+        calls: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl ThumbnailSource for CountingSource {
+        fn thumbnail(&self, _board_id: u64, _updated_at: i64) -> Option<Vec<u8>> {
+            self.calls.set(self.calls.get() + 1);
+            let source = image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255]));
+            let mut bytes = Vec::new();
+            source
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .ok()?;
+            Some(bytes)
+        }
+    }
+
+    #[test]
+    fn home_frame_paints_thumbnails_once_per_board() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut app = HomeApp::with_thumbnails(Box::new(CountingSource {
+            calls: calls.clone(),
+        }));
+        app.set_boards(vec![
+            BoardItem {
+                id: 1,
+                title: "board".to_owned(),
+                tags: vec!["t".to_owned()],
+                snippet: None,
+                updated_at: 10,
+                entry_count: 2,
+            },
+            board(2, &["t"]),
+        ]);
+
+        let ctx = egui::Context::default();
+        let frame = |app: &mut HomeApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1280.0, 760.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                assert!(app.ui(ui).is_none());
+            });
+            // 测试里没有渲染后端消费纹理上传，丢掉增量。
+            output.textures_delta.clear();
+        };
+
+        frame(&mut app);
+        // 第一帧两张画板各取一次。
+        assert_eq!(calls.get(), 2);
+        frame(&mut app);
+        // 第二帧命中 (id, updated_at) 缓存，不再向来源取字节。
+        assert_eq!(calls.get(), 2);
     }
 }

@@ -283,6 +283,8 @@ pub struct BoardApp {
     media_request: Option<String>,
     /// 顶栏点了「全部画板」，等 app 取走。
     home_request: bool,
+    /// 顶栏点了「导出图片」，等 app 截完图取走。
+    image_export_request: bool,
     fps: f32,
     /// 上一帧画布的面积，用来把新块放在视口中心。
     canvas: Rect,
@@ -309,6 +311,7 @@ impl BoardApp {
             status: None,
             media_request: None,
             home_request: false,
+            image_export_request: false,
             fps: 0.0,
             canvas: Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 760.0)),
         }
@@ -366,6 +369,7 @@ impl BoardApp {
         self.status = None;
         self.media_request = None;
         self.home_request = false;
+        self.image_export_request = false;
     }
 
     /// 拖入一份媒体：按视口中心放一块，返回时这一块已被选中。
@@ -415,6 +419,18 @@ impl BoardApp {
         let requested = self.home_request;
         self.home_request = false;
         requested
+    }
+
+    /// 顶栏点过「导出图片」时返回 true，取走时清掉。截图与保存由 app 做。
+    pub fn take_image_export_request(&mut self) -> bool {
+        let requested = self.image_export_request;
+        self.image_export_request = false;
+        requested
+    }
+
+    /// 最近一帧画布区域在屏幕坐标里的矩形（不含顶栏），app 用它裁剪截图。
+    pub fn canvas_rect(&self) -> egui::Rect {
+        self.canvas
     }
 
     /// 选中第一块，不进入编辑。给命令行验证操作条用。
@@ -484,6 +500,9 @@ impl BoardApp {
             chrome::top_bar(ui, &palette, top, &self.document.board.title, &state, error);
         if top_output.home {
             self.home_request = true;
+        }
+        if top_output.export_image {
+            self.image_export_request = true;
         }
         if let Some(kind) = top_output.new_kind {
             self.insert_new(kind);
@@ -2538,6 +2557,25 @@ mod tests {
         assert!(!app.history.can_undo());
         assert!(!app.is_dirty());
         assert!(app.selected.is_empty());
+        assert!(!app.take_image_export_request());
+    }
+
+    #[test]
+    fn canvas_rect_excludes_the_top_bar() {
+        let ctx = egui::Context::default();
+        let mut app = blank();
+        frame(&ctx, &mut app, 0.0, Vec::new());
+
+        let canvas = app.canvas_rect();
+        assert!((canvas.left()).abs() < 0.001);
+        assert!((canvas.top() - chrome::TOP_BAR_HEIGHT).abs() < 0.001);
+        assert!((canvas.width() - 1280.0).abs() < 0.001);
+        assert!((canvas.height() - (760.0 - chrome::TOP_BAR_HEIGHT)).abs() < 0.001);
+
+        assert!(!app.take_image_export_request());
+        app.image_export_request = true;
+        assert!(app.take_image_export_request());
+        assert!(!app.take_image_export_request());
     }
 
     #[test]

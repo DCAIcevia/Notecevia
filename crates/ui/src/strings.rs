@@ -152,3 +152,13 @@ pub const HIGHLIGHT_OPACITY: &str = "透明度";
 pub const HOME_CLEAR_SEARCH: &str = "清空搜索";
 pub const HOME_MORE: &str = "更多操作";
 pub const HOME_TAG_REMOVE: &str = "删除标签";
+/// 导出当前画面。
+pub const EXPORT_IMAGE: &str = "导出图片";
+pub const EXPORTING: &str = "正在导出…";
+pub fn image_exported(path: impl std::fmt::Display) -> String {
+    format!("已导出图片：{path}")
+}
+
+/// 首页标签筛选。
+pub const HOME_FILTER_CLEAR: &str = "清除筛选";
+pub const HOME_FILTER_ALL: &str = "全部";
