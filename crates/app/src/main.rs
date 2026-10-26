@@ -243,7 +243,24 @@ impl App {
             }
             HomeAction::Export(id, kind) => self.export(id, kind),
             HomeAction::Search(query) => self.search(&query),
+            HomeAction::Refresh => self.refresh_index(),
         }
+    }
+
+    /// 外部程序改过工作区时，强制重建索引并刷新列表。
+    fn refresh_index(&mut self) {
+        let result = match &self.workspace {
+            Some(workspace) => workspace.rebuild_index(),
+            None => return,
+        };
+        match result {
+            Ok(_) => self.home.set_status(strings::REFRESHED),
+            Err(error) => {
+                let message = strings::open_failed(error);
+                self.home.set_status(message);
+            }
+        }
+        self.refresh_boards();
     }
 
     /// 读出画板、改一处、写回去。重命名和改标签都走这条路。
@@ -576,6 +593,9 @@ impl eframe::App for App {
             }
         } else {
             self.handle_dropped_files(&ctx);
+            if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::R)) {
+                self.refresh_index();
+            }
             if let Some(action) = self.home.ui(ui) {
                 self.handle_home_action(action);
             }
