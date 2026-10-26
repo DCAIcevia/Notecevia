@@ -921,3 +921,44 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) {
     };
     let _ = buffer.save(path);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_keeps_letters_and_collapses_punctuation() {
+        assert_eq!(slug("格式样例 0.2.0-alpha.1"), "格式样例-0-2-0-alpha-1");
+        assert_eq!(slug("a/b:c?d"), "a-b-c-d");
+        assert_eq!(slug("   "), "board");
+        assert_eq!(slug(""), "board");
+        assert_eq!(slug("已经-合法_name"), "已经-合法_name");
+    }
+
+    #[test]
+    fn hashes_must_be_64_hex_characters() {
+        assert!(is_hash(&"a".repeat(64)));
+        assert!(!is_hash(&"a".repeat(63)));
+        assert!(!is_hash(&"z".repeat(64)));
+        assert!(!is_hash("../../etc/passwd"));
+        assert!(!is_hash(""));
+    }
+
+    #[test]
+    fn media_kind_maps_known_extensions_only() {
+        assert_eq!(media_kind(Path::new("a.PNG")), Some(BlockKind::Image));
+        assert_eq!(media_kind(Path::new("照片.jpeg")), Some(BlockKind::Image));
+        assert_eq!(media_kind(Path::new("a.mp4")), Some(BlockKind::Video));
+        assert_eq!(media_kind(Path::new("a.mkv")), Some(BlockKind::Video));
+        assert_eq!(media_kind(Path::new("a.m4a")), Some(BlockKind::Audio));
+        assert_eq!(media_kind(Path::new("a.txt")), None);
+        assert_eq!(media_kind(Path::new("no-extension")), None);
+    }
+
+    #[test]
+    fn container_extension_is_recognized() {
+        assert!(is_container(Path::new("board.notecevia")));
+        assert!(!is_container(Path::new("board.html")));
+        assert!(!is_container(Path::new("board")));
+    }
+}
