@@ -87,6 +87,14 @@ struct App {
     timed: bool,
     /// 进程启动的时刻。
     started: Instant,
+    /// 开发检查用：连续采集成帧时间多少秒后打印统计再退出。
+    frame_stats: Option<f64>,
+    /// 开始采集的时刻。
+    stats_started: Option<Instant>,
+    /// 上一帧的时刻。
+    last_frame_at: Option<Instant>,
+    /// 采到的每帧耗时，秒。
+    frame_samples: Vec<f64>,
 }
 
 impl App {
@@ -113,6 +121,10 @@ impl App {
             timing: false,
             timed: false,
             started: Instant::now(),
+            frame_stats: None,
+            stats_started: None,
+            last_frame_at: None,
+            frame_samples: Vec::new(),
         }
     }
 
@@ -517,6 +529,49 @@ impl App {
         self.save();
     }
 
+    /// 连续采一段时间帧时间，打印 min/p50/p95/max 后关窗。给「输入到可见」量下界。
+    fn collect_frame_stats(&mut self, ctx: &egui::Context) {
+        let Some(seconds) = self.frame_stats else {
+            return;
+        };
+        let now = Instant::now();
+        let started = *self.stats_started.get_or_insert(now);
+        if let Some(last) = self.last_frame_at {
+            self.frame_samples
+                .push(now.duration_since(last).as_secs_f64());
+        }
+        self.last_frame_at = Some(now);
+        if now.duration_since(started).as_secs_f64() < seconds {
+            ctx.request_repaint();
+            return;
+        }
+        let mut samples = std::mem::take(&mut self.frame_samples);
+        samples.sort_by(f64::total_cmp);
+        let percentile = |fraction: f64| -> f64 {
+            if samples.is_empty() {
+                return 0.0;
+            }
+            let index = ((samples.len() - 1) as f64 * fraction).round() as usize;
+            samples[index] * 1000.0
+        };
+        let mean = if samples.is_empty() {
+            0.0
+        } else {
+            samples.iter().sum::<f64>() / samples.len() as f64 * 1000.0
+        };
+        eprintln!(
+            "帧时间 {} 帧：min {:.1} ms，mean {:.1} ms，p50 {:.1} ms，p95 {:.1} ms，max {:.1} ms",
+            samples.len(),
+            percentile(0.0),
+            mean,
+            percentile(0.5),
+            percentile(0.95),
+            percentile(1.0),
+        );
+        self.frame_stats = None;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     /// 把截图回调的结果取回来，顺手清掉在飞标记。
     fn take_capture_result(&mut self) {
         let outcome = self.capture.lock().ok().and_then(|mut slot| slot.take());
@@ -628,6 +683,7 @@ impl eframe::App for App {
             self.timed = true;
             eprintln!("冷启动到首帧：{} ms", self.started.elapsed().as_millis());
         }
+        self.collect_frame_stats(&ctx);
         self.take_capture_result();
         if self.board.is_some() {
             if std::mem::take(&mut self.restore_thumbnail_view)
@@ -737,6 +793,7 @@ fn main() -> eframe::Result {
     let mut image_check = false;
     let mut export_check = false;
     let mut timing = false;
+    let mut frame_stats = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -750,6 +807,11 @@ fn main() -> eframe::Result {
             Some("--export-image") => image_check = true,
             Some("--export-all") => export_check = true,
             Some("--timing") => timing = true,
+            Some("--frame-stats") => {
+                frame_stats = args
+                    .next()
+                    .and_then(|seconds| seconds.to_str().and_then(|value| value.parse().ok()));
+            }
             Some(other) => eprintln!("忽略不认识的参数：{other}"),
             None => {}
         }
@@ -779,6 +841,7 @@ fn main() -> eframe::Result {
             app.image_check = image_check;
             app.export_check = export_check;
             app.timing = timing;
+            app.frame_stats = frame_stats;
             app.started = started;
             match Workspace::open(&root) {
                 Ok(workspace) => {
