@@ -162,3 +162,6 @@ pub fn image_exported(path: impl std::fmt::Display) -> String {
 /// 首页标签筛选。
 pub const HOME_FILTER_CLEAR: &str = "清除筛选";
 pub const HOME_FILTER_ALL: &str = "全部";
+/// 首页刷新列表。
+pub const HOME_REFRESH: &str = "刷新";
+pub const REFRESHED: &str = "列表已刷新";

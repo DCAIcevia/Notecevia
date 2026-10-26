@@ -54,6 +54,8 @@ pub struct BoardItem {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HomeAction {
     Create,
+    /// 外部程序改过工作区，请 app 重建索引并回填列表。
+    Refresh,
     Open(u64),
     Delete(u64),
     Rename(u64, String),
@@ -252,6 +254,9 @@ fn top_bar(state: &mut HomeState, ui: &mut Ui, palette: &theme::Palette) -> Opti
         ui.add_space(12.0);
         if ui.button(strings::HOME_NEW).clicked() {
             action = Some(HomeAction::Create);
+        }
+        if ui.button(strings::HOME_REFRESH).clicked() {
+            action = Some(HomeAction::Refresh);
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !state.search.is_empty() && ui.button("×").clicked() {
