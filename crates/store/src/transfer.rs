@@ -89,7 +89,10 @@ impl Workspace {
         let Some(board_bytes) = board_bytes else {
             return Err(Error::BadContainer("容器里没有画板文件"));
         };
-        let on_disk = format::board_from(&cbor::decode(&board_bytes)?)?;
+        // 容器里的画板也走一遍迁移；认不出的字段留着，写回时照抄。
+        let value = cbor::decode(&board_bytes)?;
+        let value = crate::migrate::board(&value)?;
+        let on_disk = format::board_from(&value)?;
         let new_board_id = self.next_board()?;
 
         // 先写块，再写媒体，最后写画板：中途失败最多留下没人引用的文件。
@@ -116,8 +119,16 @@ impl Workspace {
             }
         }
         let reference = |id: u64| self.block_ref(new_board_id, id);
-        let value = format::board_value(&on_disk.board, on_disk.updated_at, reference);
+        let value = format::board_value(
+            &on_disk.board,
+            on_disk.updated_at,
+            reference,
+            &on_disk.extras,
+            &on_disk.entry_extras,
+        );
         write_atomic(&self.board_path(new_board_id), &cbor::encode(&value))?;
+        // 导入也是新画板，索引要跟着长出来，否则首页看不到它。
+        self.remember_board_from_disk(new_board_id)?;
         Ok(new_board_id)
     }
 }

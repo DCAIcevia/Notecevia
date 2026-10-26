@@ -10,6 +10,7 @@ mod error;
 mod format;
 mod html;
 mod index;
+mod migrate;
 mod paths;
 mod transfer;
 pub mod workspace;

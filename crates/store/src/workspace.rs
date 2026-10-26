@@ -8,6 +8,7 @@
 //! 同一份图可能还被别的画板引用。
 
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fs,
     io::Write,
@@ -15,11 +16,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use notecevia_core::board::{Body, Document};
+use notecevia_core::board::{BlockKind, Body, Document};
 
 use crate::cbor;
 use crate::digest;
 use crate::format::{self, BoardOnDisk};
+use crate::index::{INDEX_FILE, Index};
+use crate::migrate;
 use crate::paths;
 
 pub use crate::error::Error;
@@ -27,19 +30,25 @@ pub use crate::error::Error;
 const BOARDS_DIR: &str = "boards";
 const BLOCKS_DIR: &str = "blocks";
 const MEDIA_DIR: &str = "media";
+const THUMBNAILS_DIR: &str = "thumbnails";
 /// 回收站目录名。放在工作区里，整个工作区拷走时一起带走。
 const TRASH_DIR: &str = ".trash";
 
 /// 一个工作区目录。
 pub struct Workspace {
     root: PathBuf,
+    /// 首页索引的内存副本。第一次用到时从 index.cbor 读，缺失或过期就重建。
+    pub(crate) index: RefCell<Option<Index>>,
 }
 
 impl Workspace {
     /// 打开或建立工作区。目录不存在就建，已有的内容不动。
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, Error> {
-        let workspace = Self { root: root.into() };
-        for dir in [BOARDS_DIR, BLOCKS_DIR, MEDIA_DIR] {
+        let workspace = Self {
+            root: root.into(),
+            index: RefCell::new(None),
+        };
+        for dir in [BOARDS_DIR, BLOCKS_DIR, MEDIA_DIR, THUMBNAILS_DIR] {
             fs::create_dir_all(workspace.root.join(dir))?;
         }
         Ok(workspace)
@@ -50,20 +59,18 @@ impl Workspace {
     }
 
     /// 最近改过的画板。没有画板时返回 None，第一次启动就是这种情况。
+    ///
+    /// 只读索引挑编号，正文仍然按需读块。
     pub fn load_latest(&self) -> Result<Option<(u64, Document)>, Error> {
-        let mut latest: Option<(i64, u64)> = None;
-        for id in self.board_ids()? {
-            let Some(on_disk) = self.read_board_lenient(id)? else {
-                continue;
-            };
-            let better = match latest {
-                Some((best_at, best_id)) => (on_disk.updated_at, id) > (best_at, best_id),
-                None => true,
-            };
-            if better {
-                latest = Some((on_disk.updated_at, id));
-            }
-        }
+        let latest = {
+            let index = self.ensure_index()?;
+            index
+                .boards
+                .iter()
+                .filter(|(_, board)| board.readable)
+                .map(|(&id, board)| (board.updated_at, id))
+                .max()
+        };
         let Some((_, id)) = latest else {
             return Ok(None);
         };
@@ -106,6 +113,14 @@ impl Workspace {
         document: &Document,
         updated_at: i64,
     ) -> Result<(), Error> {
+        // 旧文件里认不出的字段要留到写回：先从盘上收一遍，再覆盖写。
+        let (board_extras, entry_extras) = match self.read_board_lenient(board_id) {
+            Ok(Some(on_disk)) => (on_disk.extras, on_disk.entry_extras),
+            Ok(None) => (Vec::new(), BTreeMap::new()),
+            // 更高版本写的文件不覆盖，让用户先升级程序。
+            Err(error @ Error::NewerFormat { .. }) => return Err(error),
+            Err(_) => (Vec::new(), BTreeMap::new()),
+        };
         for entry in &document.board.entries {
             let Some(body) = document.body(entry.id) else {
                 continue;
@@ -114,25 +129,35 @@ impl Workspace {
             if !format::body_matches(entry.kind, body) {
                 continue;
             }
-            let value = format::body_value(entry.kind, entry.id, body);
+            let extras = self.block_extras(board_id, entry.id, entry.kind);
+            let value = format::body_value(entry.kind, entry.id, body, &extras);
             write_atomic(&self.block_path(board_id, entry.id), &cbor::encode(&value))?;
         }
         let reference = |id: u64| self.block_ref(board_id, id);
-        let value = format::board_value(&document.board, updated_at, reference);
+        let value = format::board_value(
+            &document.board,
+            updated_at,
+            reference,
+            &board_extras,
+            &entry_extras,
+        );
         write_atomic(&self.board_path(board_id), &cbor::encode(&value))?;
         self.reclaim_blocks(board_id, document, updated_at)?;
+        // 保存成功后再更新索引：索引是缓存，写失败说明工作区有问题，直接报出去。
+        self.remember_board(board_id, document, updated_at)?;
         Ok(())
     }
 
-    /// 删掉一张画板：画板文件与它的块文件一起移进回收站，媒体留着。
+    /// 删掉一张画板：画板文件、它的块文件与缩略图一起移进回收站，媒体留着。
     pub fn delete_board(&self, board_id: u64) -> Result<(), Error> {
         let board = self.board_path(board_id);
+        let thumbnail = self.thumbnail_path(board_id);
         let blocks: Vec<PathBuf> = self
             .block_ids_of(board_id)?
             .into_iter()
             .map(|block_id| self.block_path(board_id, block_id))
             .collect();
-        if !board.exists() && blocks.is_empty() {
+        if !board.exists() && blocks.is_empty() && !thumbnail.exists() {
             return Ok(());
         }
         let folder = format!("{}-board-{board_id}", now_seconds());
@@ -142,6 +167,9 @@ impl Workspace {
         for path in blocks {
             self.move_to_trash(&path, &folder)?;
         }
+        // 缩略图跟着走：画板编号以后可能复用，留着旧缩略图会张冠李戴。
+        self.move_to_trash(&thumbnail, &folder)?;
+        self.forget_board(board_id)?;
         Ok(())
     }
 
@@ -179,6 +207,22 @@ impl Workspace {
         hash_file_name(media).map(|hash| self.root.join(MEDIA_DIR).join(hash))
     }
 
+    /// 读画板缩略图。还没有缩略图时给 None，不算错误。
+    pub fn thumbnail_bytes(&self, board_id: u64) -> Result<Option<Vec<u8>>, Error> {
+        match fs::read(self.thumbnail_path(board_id)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// 存画板缩略图，覆盖旧的。内容由调用方生成，这里只当 PNG 字节落盘。
+    pub fn save_thumbnail(&self, board_id: u64, png: &[u8]) -> Result<(), Error> {
+        write_atomic(&self.thumbnail_path(board_id), png)?;
+        // 索引里记着有没有缩略图，顺手更新，免得首页在下次打开前拿不到。
+        self.set_thumbnail(board_id, true)
+    }
+
     /// 清掉工作区里上次崩溃留下的 *.tmp，返回清掉的条数。启动时调一次。
     pub fn recover(&self) -> Result<usize, Error> {
         let mut removed = 0;
@@ -207,6 +251,16 @@ impl Workspace {
 
     pub(crate) fn board_path(&self, board_id: u64) -> PathBuf {
         self.root.join(BOARDS_DIR).join(format!("{board_id}.board"))
+    }
+
+    pub(crate) fn index_path(&self) -> PathBuf {
+        self.root.join(INDEX_FILE)
+    }
+
+    pub(crate) fn thumbnail_path(&self, board_id: u64) -> PathBuf {
+        self.root
+            .join(THUMBNAILS_DIR)
+            .join(format!("{board_id}.png"))
     }
 
     /// 画板文件在容器与 block_ref 里的写法：工作区内，正斜杠，跨平台一致。
@@ -238,6 +292,8 @@ impl Workspace {
             Err(error) => return Err(error.into()),
         };
         let value = cbor::decode(&bytes)?;
+        // 旧格式在这里显式补齐字段，再交给当前格式的解析。
+        let value = migrate::board(&value)?;
         Ok(Some(format::board_from(&value)?))
     }
 
@@ -269,12 +325,31 @@ impl Workspace {
             let Ok(value) = cbor::decode(&bytes) else {
                 continue;
             };
+            let Ok(value) = migrate::block(&value) else {
+                continue;
+            };
             let Ok(body) = format::body_from(&value, entry.kind) else {
                 continue;
             };
             bodies.insert(entry.id, body);
         }
         bodies
+    }
+
+    /// 块文件里认不出的字段。写回时照抄，旧版本才不会把新字段抹掉。
+    fn block_extras(
+        &self,
+        board_id: u64,
+        block_id: u64,
+        kind: BlockKind,
+    ) -> Vec<(cbor::Value, cbor::Value)> {
+        let Ok(bytes) = fs::read(self.block_path(board_id, block_id)) else {
+            return Vec::new();
+        };
+        let Ok(value) = cbor::decode(&bytes) else {
+            return Vec::new();
+        };
+        format::body_unknown_fields(&value, kind)
     }
 
     /// 保存成功后把本画板不再被目录项引用的块文件移进回收站。

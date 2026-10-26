@@ -30,8 +30,26 @@ impl Value {
         Self::Map(pairs)
     }
 
+    /// 用文本键建映射，末尾接上原样保留的未知字段。
+    pub fn map_with_extras(pairs: Vec<(&str, Value)>, extras: Vec<(Value, Value)>) -> Self {
+        let mut map: Vec<(Value, Value)> = pairs
+            .into_iter()
+            .map(|(key, value)| (Self::Text(key.to_owned()), value))
+            .collect();
+        map.extend(extras);
+        Self::Map(map)
+    }
+
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
+    }
+
+    /// 映射的键值对；不是映射给 None。
+    pub fn as_map(&self) -> Option<&[(Value, Value)]> {
+        match self {
+            Self::Map(pairs) => Some(pairs),
+            _ => None,
+        }
     }
 
     /// 取映射里的一个键，非映射或没有该键都返回 None。
@@ -285,6 +303,30 @@ mod tests {
         ]);
         let bytes = encode(&value);
         assert_eq!(decode(&bytes), Ok(value));
+    }
+
+    #[test]
+    fn extras_are_appended_after_the_known_keys() {
+        let value = Value::map_with_extras(
+            vec![
+                ("format", Value::Integer(2)),
+                ("title", Value::text("画板")),
+            ],
+            vec![
+                (Value::text("future"), Value::Bool(true)),
+                (Value::text("future_number"), Value::Integer(7)),
+            ],
+        );
+        let bytes = encode(&value);
+        assert_eq!(decode(&bytes), Ok(value.clone()));
+        let pairs = value.as_map().expect("是映射");
+        assert_eq!(
+            pairs
+                .iter()
+                .filter_map(|(key, _)| key.as_text())
+                .collect::<Vec<_>>(),
+            vec!["format", "title", "future", "future_number"]
+        );
     }
 
     #[test]

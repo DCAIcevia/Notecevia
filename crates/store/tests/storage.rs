@@ -564,3 +564,157 @@ fn saving_moves_orphan_blocks_to_trash_and_keeps_media() {
             .is_empty()
     );
 }
+
+#[test]
+fn unknown_fields_survive_a_load_save_roundtrip() {
+    let temp = TempWorkspace::new("unknown-fields");
+    // 手工构造：画板、目录项、块正文都带上本程序不认识的字段。
+    let board = cbor::Value::map_with_extras(
+        vec![
+            ("format", cbor::Value::Integer(2)),
+            ("kind", cbor::Value::text("board")),
+            ("title", cbor::Value::text("未来格式")),
+            ("tags", cbor::Value::Array(vec![cbor::Value::text("保留")])),
+            ("updated_at", cbor::Value::Integer(111)),
+            (
+                "entries",
+                cbor::Value::Array(vec![cbor::Value::map_with_extras(
+                    vec![
+                        ("id", cbor::Value::Integer(1)),
+                        ("block_type", cbor::Value::Integer(1)),
+                        ("block_ref", cbor::Value::text("blocks/1-1.block")),
+                        ("x", cbor::Value::Float(10.0)),
+                        ("y", cbor::Value::Float(20.0)),
+                        ("w", cbor::Value::Float(30.0)),
+                        ("h", cbor::Value::Float(40.0)),
+                        ("rotation", cbor::Value::Float(0.0)),
+                        ("z_index", cbor::Value::Integer(0)),
+                        ("locked", cbor::Value::Bool(false)),
+                        ("visible", cbor::Value::Bool(true)),
+                    ],
+                    vec![
+                        (cbor::Value::text("future_entry"), cbor::Value::Integer(7)),
+                        (
+                            cbor::Value::text("future_entry_text"),
+                            cbor::Value::text("留着我"),
+                        ),
+                    ],
+                )]),
+            ),
+        ],
+        vec![(cbor::Value::text("future_board"), cbor::Value::Bool(true))],
+    );
+    fs::write(temp.path("boards/1.board"), cbor::encode(&board)).expect("写画板");
+
+    let block = cbor::Value::map_with_extras(
+        vec![
+            ("format", cbor::Value::Integer(2)),
+            ("block_type", cbor::Value::Integer(1)),
+            ("id", cbor::Value::Integer(1)),
+            ("text", cbor::Value::text("正文")),
+        ],
+        vec![
+            (
+                cbor::Value::text("future_block"),
+                cbor::Value::text("块里的未来字段"),
+            ),
+            (cbor::Value::text("future_number"), cbor::Value::Float(1.5)),
+        ],
+    );
+    fs::write(temp.path("blocks/1-1.block"), cbor::encode(&block)).expect("写块");
+
+    let document = temp.workspace.load(1).expect("读画板");
+    assert_eq!(document.text_of(1), "正文");
+    temp.workspace.save_at(1, &document, 111).expect("写回");
+
+    let saved_board = decode_file(&temp.path("boards/1.board"));
+    assert_eq!(
+        saved_board
+            .get("future_board")
+            .and_then(cbor::Value::as_bool),
+        Some(true)
+    );
+    let entry = entry_with(&saved_board, 1);
+    assert_eq!(
+        entry.get("future_entry").and_then(cbor::Value::as_integer),
+        Some(7)
+    );
+    assert_eq!(
+        entry
+            .get("future_entry_text")
+            .and_then(cbor::Value::as_text),
+        Some("留着我")
+    );
+
+    let saved_block = decode_file(&temp.path("blocks/1-1.block"));
+    assert_eq!(
+        saved_block
+            .get("future_block")
+            .and_then(cbor::Value::as_text),
+        Some("块里的未来字段")
+    );
+    assert_eq!(
+        saved_block
+            .get("future_number")
+            .and_then(cbor::Value::as_float),
+        Some(1.5)
+    );
+    assert_eq!(
+        saved_block.get("text").and_then(cbor::Value::as_text),
+        Some("正文")
+    );
+
+    // 改过的字段仍然按新值写：未知字段不会盖掉已知字段。
+    let mut document = document;
+    if let Some(Body::Text(block)) = document.body_mut(1) {
+        block.text = "改过的正文".to_owned();
+    }
+    temp.workspace.save_at(1, &document, 111).expect("再写回");
+    let saved_block = decode_file(&temp.path("blocks/1-1.block"));
+    assert_eq!(
+        saved_block.get("text").and_then(cbor::Value::as_text),
+        Some("改过的正文")
+    );
+    assert_eq!(
+        saved_block
+            .get("future_block")
+            .and_then(cbor::Value::as_text),
+        Some("块里的未来字段"),
+        "已知字段更新时，未知字段还要在"
+    );
+}
+
+#[test]
+fn thumbnails_are_optional_and_follow_the_board_into_trash() {
+    let temp = TempWorkspace::new("thumbnail");
+    assert!(
+        temp.workspace
+            .thumbnail_bytes(1)
+            .expect("读缩略图")
+            .is_none()
+    );
+    temp.workspace
+        .save_thumbnail(1, b"png bytes")
+        .expect("存缩略图");
+    assert_eq!(
+        temp.workspace.thumbnail_bytes(1).expect("读缩略图"),
+        Some(b"png bytes".to_vec())
+    );
+    assert!(temp.path("thumbnails/1.png").is_file());
+
+    temp.workspace
+        .save_at(1, &Document::new("画板"), 100)
+        .expect("存画板");
+    temp.workspace.delete_board(1).expect("删画板");
+    assert!(
+        !temp.path("thumbnails/1.png").exists(),
+        "缩略图应该跟着画板进回收站"
+    );
+    assert_eq!(files_with_extension(&temp.path(".trash"), "png").len(), 1);
+    assert!(
+        temp.workspace
+            .thumbnail_bytes(1)
+            .expect("读缩略图")
+            .is_none()
+    );
+}

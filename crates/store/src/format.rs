@@ -2,6 +2,9 @@
 //!
 //! 字段表见 docs/design/format.md。这里只负责读写一致：写出去的值能原样读回来，
 //! 读到坏条目时跳过这一条而不是让整张画板打不开。认不出的块类型一律跳过，不猜。
+//!
+//! 认不出的字段不丢：读的时候收进 extras，写回时追加在已知字段后面原样照抄。
+//! 这样新版本加字段后，旧版本读写一轮不会把新字段抹掉。
 
 use std::collections::BTreeMap;
 
@@ -22,71 +25,133 @@ pub(crate) struct BoardOnDisk {
     pub updated_at: i64,
     /// 只有文件里真的写了 block_ref 的条目才在这里；没有的由调用方按编号拼。
     pub refs: BTreeMap<u64, String>,
+    /// 认不出的画板字段，写回时原样照抄。
+    pub extras: Vec<(Value, Value)>,
+    /// 每条目录项认不出的字段，按目录项编号存。
+    pub entry_extras: BTreeMap<u64, Vec<(Value, Value)>>,
 }
 
-impl BoardOnDisk {
-    /// 列表页要的概要，不用把正文读进来。
-    pub(crate) fn summary(&self) -> Summary {
-        Summary {
-            title: self.board.title.clone(),
-            tags: self.board.tags.clone(),
-            updated_at: self.updated_at,
-            entry_count: self.board.entries.len(),
-        }
+/// 本格式认识的画板字段。其余字段读出来留着，写回时照抄。
+const BOARD_KEYS: [&str; 6] = ["format", "kind", "title", "tags", "updated_at", "entries"];
+/// 目录项认识的字段。
+const ENTRY_KEYS: [&str; 11] = [
+    "id",
+    "block_type",
+    "block_ref",
+    "x",
+    "y",
+    "w",
+    "h",
+    "rotation",
+    "z_index",
+    "locked",
+    "visible",
+];
+/// 块文件共有的字段。
+const BODY_KEYS: [&str; 3] = ["format", "block_type", "id"];
+
+const TEXT_KEYS: [&str; 5] = ["text", "font", "size", "color", "background"];
+const IMAGE_KEYS: [&str; 3] = ["media", "name", "fit"];
+const MEDIA_KEYS: [&str; 3] = ["media", "name", "bytes"];
+const TABLE_KEYS: [&str; 3] = ["rows", "cols", "cells"];
+const SHAPE_KEYS: [&str; 4] = ["shape", "fill", "stroke", "stroke_width"];
+const HIGHLIGHT_KEYS: [&str; 2] = ["color", "opacity"];
+
+/// 某类块正文自己认识的字段。
+fn body_keys(kind: BlockKind) -> &'static [&'static str] {
+    match kind {
+        BlockKind::Text => &TEXT_KEYS,
+        BlockKind::Image => &IMAGE_KEYS,
+        BlockKind::Video | BlockKind::Audio => &MEDIA_KEYS,
+        BlockKind::Table => &TABLE_KEYS,
+        BlockKind::Shape => &SHAPE_KEYS,
+        BlockKind::Highlight => &HIGHLIGHT_KEYS,
     }
 }
 
-/// 列表页一行画板的摘要。
-pub(crate) struct Summary {
-    pub title: String,
-    pub tags: Vec<String>,
-    pub updated_at: i64,
-    pub entry_count: usize,
+/// 文件里认不出的键值对，顺序与文件里一致。
+fn unknown_fields(value: &Value, known: &[&str]) -> Vec<(Value, Value)> {
+    let Some(pairs) = value.as_map() else {
+        return Vec::new();
+    };
+    pairs
+        .iter()
+        .filter(|(key, _)| !matches!(key, Value::Text(text) if known.contains(&text.as_str())))
+        .map(|(key, item)| (key.clone(), item.clone()))
+        .collect()
+}
+
+/// 画板文件里认不出的字段。
+pub(crate) fn board_unknown_fields(value: &Value) -> Vec<(Value, Value)> {
+    unknown_fields(value, &BOARD_KEYS)
+}
+
+/// 目录项里认不出的字段。
+pub(crate) fn entry_unknown_fields(value: &Value) -> Vec<(Value, Value)> {
+    unknown_fields(value, &ENTRY_KEYS)
+}
+
+/// 块文件里认不出的字段：共有字段加这一类自己的字段之外的全留着。
+pub(crate) fn body_unknown_fields(value: &Value, kind: BlockKind) -> Vec<(Value, Value)> {
+    let mut known = BODY_KEYS.to_vec();
+    known.extend_from_slice(body_keys(kind));
+    unknown_fields(value, &known)
 }
 
 pub(crate) fn board_value(
     board: &Board,
     updated_at: i64,
     reference: impl Fn(u64) -> String,
+    extras: &[(Value, Value)],
+    entry_extras: &BTreeMap<u64, Vec<(Value, Value)>>,
 ) -> Value {
     let entries = board
         .entries
         .iter()
-        .map(|entry| entry_value(entry, &reference(entry.id)))
+        .map(|entry| {
+            let extra = entry_extras.get(&entry.id).map_or(&[][..], Vec::as_slice);
+            entry_value(entry, &reference(entry.id), extra)
+        })
         .collect();
-    Value::map(vec![
-        ("format", Value::Integer(FORMAT)),
-        ("kind", Value::text("board")),
-        ("title", Value::text(board.title.clone())),
-        (
-            "tags",
-            Value::Array(
-                board
-                    .tags
-                    .iter()
-                    .map(|tag| Value::text(tag.clone()))
-                    .collect(),
+    Value::map_with_extras(
+        vec![
+            ("format", Value::Integer(FORMAT)),
+            ("kind", Value::text("board")),
+            ("title", Value::text(board.title.clone())),
+            (
+                "tags",
+                Value::Array(
+                    board
+                        .tags
+                        .iter()
+                        .map(|tag| Value::text(tag.clone()))
+                        .collect(),
+                ),
             ),
-        ),
-        ("updated_at", Value::Integer(updated_at)),
-        ("entries", Value::Array(entries)),
-    ])
+            ("updated_at", Value::Integer(updated_at)),
+            ("entries", Value::Array(entries)),
+        ],
+        extras.to_vec(),
+    )
 }
 
-fn entry_value(entry: &Entry, reference: &str) -> Value {
-    Value::map(vec![
-        ("id", Value::Integer(integer_of(entry.id))),
-        ("block_type", Value::Integer(entry.kind.number())),
-        ("block_ref", Value::text(reference.to_owned())),
-        ("x", Value::Float(f64::from(entry.geometry.x))),
-        ("y", Value::Float(f64::from(entry.geometry.y))),
-        ("w", Value::Float(f64::from(entry.geometry.width))),
-        ("h", Value::Float(f64::from(entry.geometry.height))),
-        ("rotation", Value::Float(f64::from(entry.geometry.rotation))),
-        ("z_index", Value::Integer(i64::from(entry.z))),
-        ("locked", Value::Bool(entry.locked)),
-        ("visible", Value::Bool(entry.visible)),
-    ])
+fn entry_value(entry: &Entry, reference: &str, extras: &[(Value, Value)]) -> Value {
+    Value::map_with_extras(
+        vec![
+            ("id", Value::Integer(integer_of(entry.id))),
+            ("block_type", Value::Integer(entry.kind.number())),
+            ("block_ref", Value::text(reference.to_owned())),
+            ("x", Value::Float(f64::from(entry.geometry.x))),
+            ("y", Value::Float(f64::from(entry.geometry.y))),
+            ("w", Value::Float(f64::from(entry.geometry.width))),
+            ("h", Value::Float(f64::from(entry.geometry.height))),
+            ("rotation", Value::Float(f64::from(entry.geometry.rotation))),
+            ("z_index", Value::Integer(i64::from(entry.z))),
+            ("locked", Value::Bool(entry.locked)),
+            ("visible", Value::Bool(entry.visible)),
+        ],
+        extras.to_vec(),
+    )
 }
 
 pub(crate) fn board_from(value: &Value) -> Result<BoardOnDisk, Error> {
@@ -112,6 +177,8 @@ pub(crate) fn board_from(value: &Value) -> Result<BoardOnDisk, Error> {
         .and_then(Value::as_array)
         .ok_or(Error::MissingField("entries"))?;
 
+    let extras = board_unknown_fields(value);
+    let mut entry_extras = BTreeMap::new();
     let mut refs = BTreeMap::new();
     for value in entries {
         // 单条目坏了只丢这一条，其余照读：不认识的块类型、坏掉的坐标都跳过。
@@ -167,11 +234,17 @@ pub(crate) fn board_from(value: &Value) -> Result<BoardOnDisk, Error> {
         if let Some(reference) = value.get("block_ref").and_then(Value::as_text) {
             refs.insert(id, reference.to_owned());
         }
+        let extra = entry_unknown_fields(value);
+        if !extra.is_empty() {
+            entry_extras.insert(id, extra);
+        }
     }
     Ok(BoardOnDisk {
         board,
         updated_at,
         refs,
+        extras,
+        entry_extras,
     })
 }
 
@@ -183,7 +256,12 @@ pub(crate) fn body_matches(kind: BlockKind, body: &Body) -> bool {
     }
 }
 
-pub(crate) fn body_value(kind: BlockKind, id: u64, body: &Body) -> Value {
+pub(crate) fn body_value(
+    kind: BlockKind,
+    id: u64,
+    body: &Body,
+    extras: &[(Value, Value)],
+) -> Value {
     let mut pairs = vec![
         ("format", Value::Integer(FORMAT)),
         ("block_type", Value::Integer(kind.number())),
@@ -248,7 +326,7 @@ pub(crate) fn body_value(kind: BlockKind, id: u64, body: &Body) -> Value {
             pairs.push(("opacity", Value::Float(f64::from(highlight.opacity))));
         }
     }
-    Value::map(pairs)
+    Value::map_with_extras(pairs, extras.to_vec())
 }
 
 pub(crate) fn body_from(value: &Value, kind: BlockKind) -> Result<Body, Error> {
@@ -423,7 +501,7 @@ fn highlight_from(value: &Value) -> Result<Body, Error> {
     }))
 }
 
-fn format_of(value: &Value) -> Result<i64, Error> {
+pub(crate) fn format_of(value: &Value) -> Result<i64, Error> {
     let found = value
         .get("format")
         .and_then(Value::as_integer)
