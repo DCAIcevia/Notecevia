@@ -8,11 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui;
+use notecevia_core::volume::EMPTY_BOOK_ID;
 use notecevia_core::{BlockKind, Document};
 use notecevia_store::Workspace;
 use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
+use notecevia_ui::library::{Library, LibraryAction, PageRow, VolumeRow};
 use notecevia_ui::media::MediaSource;
-use notecevia_ui::shell::{MenuCommand, Shell};
+use notecevia_ui::shell::{MenuCommand, Shell, ViewMode};
 use notecevia_ui::{BoardApp, strings, theme};
 
 /// 自动保存的间隔，秒。改动一直在就按这个节奏落盘。
@@ -77,6 +79,12 @@ struct App {
     shell: Shell,
     /// 上一次设过的窗口标题，变了才发命令。
     window_title: Option<String>,
+    /// 册视图的状态：册列表与目录。
+    library: Library,
+    /// 当前打开的册。默认是 Empty book。
+    volume_id: u64,
+    /// 当前视图。外壳会把它改回去，这里跟着变。
+    view: ViewMode,
     /// 当前画板的编号，文件名就是它。
     board_id: u64,
     /// 旧文件打不开时关掉写盘，免得用空画板盖掉用户原来那份。
@@ -130,6 +138,9 @@ impl App {
             board: None,
             shell: Shell::new(),
             window_title: None,
+            library: Library::new(EMPTY_BOOK_ID),
+            volume_id: EMPTY_BOOK_ID,
+            view: ViewMode::Page,
             board_id: 1,
             can_save: false,
             last_autosave: 0.0,
@@ -265,7 +276,7 @@ impl App {
         self.last_thumbnail_at = f64::NEG_INFINITY;
         self.save();
         // 侧栏一直挂在那儿，新建完得让列表立刻看见，否则会显示"还没有笔记"。
-        self.refresh_boards();
+        self.refresh_library();
         self.note_workspace_stamp();
         self.status(strings::BOARD_CREATED);
     }
@@ -399,6 +410,150 @@ impl App {
         }
         self.refresh_boards();
         self.note_workspace_stamp();
+    }
+
+    /// 当前册的名字。
+    fn volume_title(&self) -> String {
+        self.library
+            .volumes()
+            .iter()
+            .find(|volume| volume.id == self.volume_id)
+            .map(|volume| volume.title.clone())
+            .unwrap_or_else(|| strings::SHELL_VIEW_VOLUME.to_owned())
+    }
+
+    /// 重新读册列表与当前册的目录。
+    fn refresh_library(&mut self) {
+        let Some(workspace) = &self.workspace else {
+            return;
+        };
+        let volumes = match workspace.list_volumes() {
+            Ok(volumes) => volumes,
+            Err(error) => {
+                let message = strings::open_failed(error);
+                self.home.set_error(message);
+                return;
+            }
+        };
+        let rows: Vec<VolumeRow> = volumes
+            .iter()
+            .map(|volume| VolumeRow {
+                id: volume.id,
+                title: volume.title.clone(),
+                pages: volume.page_count,
+            })
+            .collect();
+        self.library.set_volumes(rows);
+        self.library.set_current(Some(self.volume_id));
+
+        let pages = workspace
+            .pages_in_volume(self.volume_id)
+            .unwrap_or_default();
+        let infos = workspace.list_boards().unwrap_or_default();
+        let page_rows: Vec<PageRow> = pages
+            .iter()
+            .filter_map(|id| {
+                infos
+                    .iter()
+                    .find(|info| info.id == *id)
+                    .map(|info| PageRow {
+                        id: *id,
+                        title: info.title.clone(),
+                    })
+            })
+            .collect();
+        self.library.set_pages(page_rows);
+
+        // 页视图列的也是"当前册的页"，两处不能各说各的。
+        let order: Vec<u64> = pages;
+        let mut items: Vec<BoardItem> = Vec::new();
+        for id in order {
+            if let Some(info) = infos.iter().find(|info| info.id == id) {
+                items.push(board_item(info.clone()));
+            }
+        }
+        self.home.set_boards(items);
+    }
+
+    /// 册视图按出来的动作。
+    fn handle_library_action(&mut self, action: LibraryAction) {
+        match action {
+            LibraryAction::New => self.new_volume(),
+            LibraryAction::Open(id) => {
+                self.volume_id = id;
+                self.refresh_library();
+            }
+            LibraryAction::Delete(id) => {
+                let result = match &self.workspace {
+                    Some(workspace) => workspace.delete_volume(id),
+                    None => return,
+                };
+                match result {
+                    Ok(()) => {
+                        self.home.set_status(strings::BOARD_DELETED);
+                        if self.volume_id == id {
+                            self.volume_id = EMPTY_BOOK_ID;
+                        }
+                        self.refresh_boards();
+                        self.refresh_library();
+                    }
+                    Err(error) => self.home.set_error(strings::open_failed(error)),
+                }
+            }
+            LibraryAction::Rename(id, title) => {
+                let changed = match &self.workspace {
+                    Some(workspace) => workspace.load_volume(id).map(|mut volume| {
+                        volume.title = title;
+                        volume
+                    }),
+                    None => return,
+                };
+                if let Ok(volume) = changed {
+                    if let Some(workspace) = &self.workspace {
+                        let result = workspace.save_volume(id, &volume);
+                        if let Err(error) = result {
+                            self.home.set_error(strings::save_failed(error));
+                            return;
+                        }
+                    }
+                    self.refresh_library();
+                }
+            }
+            LibraryAction::OpenPage(page) => {
+                self.open_board(page);
+                self.view = ViewMode::Page;
+                self.shell.set_view(ViewMode::Page);
+            }
+            LibraryAction::RemoveFromVolume(page) => {
+                let result = match &self.workspace {
+                    Some(workspace) => workspace.unassign_page(page),
+                    None => return,
+                };
+                if let Err(error) = result {
+                    self.home.set_error(strings::save_failed(error));
+                }
+                self.refresh_library();
+            }
+        }
+    }
+
+    /// 新建一本册并打开它。
+    fn new_volume(&mut self) {
+        let Some(workspace) = &self.workspace else {
+            return;
+        };
+        let next = workspace.next_volume();
+        let Ok(id) = next else {
+            self.home.set_error(strings::open_failed("取不到新册编号"));
+            return;
+        };
+        let volume = notecevia_core::Volume::new(strings::LIBRARY_UNTITLED);
+        if let Err(error) = workspace.save_volume(id, &volume) {
+            self.home.set_error(strings::save_failed(error));
+            return;
+        }
+        self.volume_id = id;
+        self.refresh_library();
     }
 
     fn search(&mut self, query: &str) {
@@ -742,10 +897,13 @@ impl eframe::App for App {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
         self.home.set_now(now);
-        // 笔记名放窗口标题栏：工具栏里再顶一个名字，就成标签页了。
+        // 当前东西的名字放窗口标题栏：界面里再顶一个名字，就成标签页了。
         let title = match &self.board {
-            Some(board) => format!("{} — Notecevia", board.document().board.title),
-            None => "Notecevia".to_owned(),
+            Some(board) if self.view == ViewMode::Page => {
+                format!("{} — Notecevia", board.document().board.title)
+            }
+            _ if self.view == ViewMode::Volume => format!("{} — Notecevia", self.volume_title()),
+            _ => "Notecevia".to_owned(),
         };
         if self.window_title.as_deref() != Some(title.as_str()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -766,7 +924,12 @@ impl eframe::App for App {
             }
         }
 
-        let output = self.shell.ui(ui, &mut self.home, self.board.as_mut());
+        let output = self.shell.ui(
+            ui,
+            &mut self.home,
+            Some(&mut self.library),
+            self.board.as_mut(),
+        );
         if output.new_note {
             self.create_board();
         }
@@ -825,6 +988,15 @@ impl eframe::App for App {
         }
         if let Some(action) = output.home {
             self.handle_home_action(action);
+        }
+        if let Some(view) = output.view {
+            self.view = view;
+            if view == ViewMode::Volume {
+                self.refresh_library();
+            }
+        }
+        if let Some(action) = output.library {
+            self.handle_library_action(action);
         }
 
         if self.board.is_some() {
@@ -927,6 +1099,7 @@ fn main() -> eframe::Result {
     let mut edit = false;
     let mut select = false;
     let mut home = false;
+    let mut volume_view = false;
     let mut thumbnail_check = false;
     let mut image_check = false;
     let mut export_check = false;
@@ -942,6 +1115,7 @@ fn main() -> eframe::Result {
             Some("--edit") => edit = true,
             Some("--select") => select = true,
             Some("--home") => home = true,
+            Some("--volume") => volume_view = true,
             Some("--thumbnail") => thumbnail_check = true,
             Some("--export-image") => image_check = true,
             Some("--export-all") => export_check = true,
@@ -1002,6 +1176,7 @@ fn main() -> eframe::Result {
                     }));
                     app.can_save = true;
                     app.refresh_boards();
+                    app.refresh_library();
                     listed_at = started.elapsed();
                     app.note_workspace_stamp();
                     if recovered > 0 {
@@ -1031,7 +1206,13 @@ fn main() -> eframe::Result {
             }
 
             // 截图与交互检查要直接进画布；普通启动停在首页。
-            let force_board = !home && (stress || edit || select || nudge || app.shot.is_some());
+            if volume_view {
+                app.view = ViewMode::Volume;
+                app.refresh_library();
+                app.shell.set_view(ViewMode::Volume);
+            }
+            let force_board =
+                !home && !volume_view && (stress || edit || select || nudge || app.shot.is_some());
             if force_board {
                 app.open_latest_or_create();
             }

@@ -238,3 +238,18 @@ pub const SHELL_VIEW_VOLUME: &str = "册";
 pub const SHELL_VIEW_SHELF: &str = "书架";
 /// 还没做的东西，悬停时说清楚，别让人以为点了没反应是坏了。
 pub const SHELL_NOT_YET: &str = "还没做";
+
+/// 册视图。
+pub const LIBRARY_NEW: &str = "新建册";
+pub const LIBRARY_UNTITLED: &str = "新册";
+pub const LIBRARY_DELETE: &str = "删掉这本册";
+pub const LIBRARY_REMOVE: &str = "移出这本册";
+pub const LIBRARY_EMPTY: &str = "这本册还没有页";
+pub const LIBRARY_DELETE_TITLE: &str = "删掉这本册？";
+pub const LIBRARY_DELETE_NOTE: &str = "它的页会一起进回收站，30 天后彻底清掉。";
+pub const LIBRARY_DELETE_CONFIRM: &str = "删掉";
+pub const LIBRARY_CANCEL: &str = "取消";
+
+pub fn page_count(pages: usize) -> String {
+    format!("{pages} 页")
+}
