@@ -727,12 +727,6 @@ fn empty_state(ui: &mut Ui) {
                 .size(theme::ui().body)
                 .color(theme::chrome().text_muted),
         );
-        ui.add_space(theme::ui().gap_s);
-        ui.label(
-            egui::RichText::new(strings::HOME_EMPTY_HINT)
-                .size(theme::ui().meta)
-                .color(theme::chrome().text_faint),
-        );
     });
 }
 

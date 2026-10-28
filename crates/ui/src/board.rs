@@ -759,8 +759,9 @@ impl BoardApp {
     /// 滑块自己画：默认控件在这套配色下只剩一个孤零零的把手，看不出轨道。
     fn zoom_control(&mut self, ui: &mut egui::Ui, canvas: Rect) {
         let painter = ui.painter().clone();
+        // 离画布右下角留出一截：滑到头时把手不该贴在边上。
         let controls = Rect::from_min_size(
-            egui::pos2(canvas.max.x - 176.0, canvas.max.y - 36.0),
+            egui::pos2(canvas.max.x - 188.0, canvas.max.y - 44.0),
             Vec2::new(164.0, theme::ui().control_height),
         );
         painter.text(

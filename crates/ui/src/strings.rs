@@ -97,7 +97,6 @@ pub const HOME_EXPORT_CONTAINER: &str = "导出容器";
 pub const HOME_EXPORT_HTML: &str = "导出 HTML";
 pub const HOME_SEARCH_HINT: &str = "搜索标题、标签与正文";
 pub const HOME_EMPTY: &str = "还没有笔记";
-pub const HOME_EMPTY_HINT: &str = "点右上角 ＋ 新建";
 pub const HOME_NO_RESULTS: &str = "没有匹配的笔记";
 pub const HOME_NO_RESULTS_HINT: &str = "换个词试试，或者清空搜索";
 pub const HOME_TAGS: &str = "标签";
@@ -179,9 +178,7 @@ pub const MEDIA_IMAGE: &str = "图片";
 pub const MEDIA_VIDEO: &str = "视频";
 pub const MEDIA_AUDIO: &str = "音频";
 pub const MEDIA_EMPTY: &str = "还没有资源";
-pub const MEDIA_EMPTY_HINT: &str = "点「导入」把文件加进来";
 pub const MEDIA_NO_MATCH: &str = "没有匹配的资源";
-pub const MEDIA_NO_MATCH_HINT: &str = "换个词或者换个筛选";
 pub const MEDIA_NEEDS_NOTE: &str = "先打开一篇笔记再放资源";
 
 /// 导入了几个文件。
@@ -212,10 +209,6 @@ pub const TRASH_EMPTIED: &str = "回收站已清空";
 /// 回收站：留多久，说清后果。
 pub fn trash_hint(days: i64) -> String {
     format!("删掉的笔记、册与书架会在这里留 {days} 天，到期自动清掉")
-}
-
-pub fn trash_empty_hint(days: i64) -> String {
-    format!("删掉的东西会先放在这里，{days} 天内都能还原")
 }
 
 /// 回收站一条的元信息：种类 · 还剩几天 · 大小。

@@ -103,6 +103,8 @@ pub struct Shell {
     layout: Layout,
     /// 宽度改过、还没写回文件。
     layout_dirty: bool,
+    /// 正在拖的那条边界。拖的时候只跟指针走，松手才决定收不收。
+    drag: Option<EdgeDrag>,
     view: ViewMode,
 }
 
@@ -123,6 +125,7 @@ impl Shell {
             query: String::new(),
             layout,
             layout_dirty: false,
+            drag: None,
             view: ViewMode::Page,
         }
     }
@@ -242,15 +245,13 @@ impl Shell {
         let assets_grab = (self.view == ViewMode::Page)
             .then(|| grab_strip(ui, body, assets_edge, Side::Right, "shell-grab-assets"));
         let list_grab_held = list_grab.hovered() || list_grab.dragged();
-        if list_grab.dragged() {
-            self.layout.list = layout::drag_width(
-                list_width,
-                list_grab.drag_delta().x,
-                layout::LIST_MIN,
-                layout::LIST_MAX,
-            );
-            self.layout_dirty = true;
-        }
+        self.track_edge(
+            &list_grab,
+            Side::Left,
+            list_width,
+            layout::LIST_MIN,
+            layout::LIST_MAX,
+        );
         if list_grab.double_clicked() {
             self.layout.list = layout::LIST_DEFAULT;
             self.layout_dirty = true;
@@ -258,16 +259,13 @@ impl Shell {
         let mut assets_grab_held = false;
         if let Some(grab) = &assets_grab {
             assets_grab_held = grab.hovered() || grab.dragged();
-            if grab.dragged() {
-                // 右栏的边界和外框反着走：往左拖才是变宽。
-                self.layout.assets = layout::drag_width(
-                    assets_width,
-                    -grab.drag_delta().x,
-                    layout::ASSETS_MIN,
-                    layout::ASSETS_MAX,
-                );
-                self.layout_dirty = true;
-            }
+            self.track_edge(
+                grab,
+                Side::Right,
+                assets_width,
+                layout::ASSETS_MIN,
+                layout::ASSETS_MAX,
+            );
             if grab.double_clicked() {
                 self.layout.assets = layout::ASSETS_DEFAULT;
                 self.layout_dirty = true;
@@ -378,6 +376,46 @@ impl Shell {
         output
     }
 
+    /// 跟一条边界的手势：按下记起点，拖动只跟指针走，松手才落定。
+    ///
+    /// 这样拖到最小宽度就停住，面板不会在手里突然消失；要收起得再往里拖一截，
+    /// 松手才真的收起来。
+    fn track_edge(&mut self, grab: &egui::Response, side: Side, start: f32, min: f32, max: f32) {
+        let grow = match side {
+            Side::Left => 1.0,
+            Side::Right => -1.0,
+        };
+        if grab.drag_started() {
+            self.drag = Some(EdgeDrag {
+                side,
+                start,
+                want: start,
+            });
+        }
+        let Some(mut drag) = self.drag.filter(|drag| drag.side == side) else {
+            return;
+        };
+        if grab.dragged() {
+            drag.want += grab.drag_delta().x * grow;
+            self.drag = Some(drag);
+            self.store_width(side, layout::dragging(drag.start, drag.want, min, max));
+            self.layout_dirty = true;
+        }
+        if grab.drag_stopped() {
+            self.drag = None;
+            self.store_width(side, layout::released(drag.start, drag.want, min, max));
+            self.layout_dirty = true;
+        }
+    }
+
+    /// 把宽度写到对应的那条栏上。
+    fn store_width(&mut self, side: Side, width: f32) {
+        match side {
+            Side::Left => self.layout.list = width,
+            Side::Right => self.layout.assets = width,
+        }
+    }
+
     /// 顶栏：左边是标记，接着是菜单。右边留白，菜单不顶到窗口边上。
     fn top_bar(&mut self, ui: &mut Ui, rect: Rect, has_note: bool, output: &mut ShellOutput) {
         let painter = ui.painter().clone();
@@ -420,9 +458,10 @@ impl Shell {
     ) {
         let painter = ui.painter().clone();
         painter.rect_filled(rect, CornerRadius::ZERO, theme::chrome().window);
+        // 工具栏与画布之间要看得见一条界：太淡就等于没有工具栏。
         painter.line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            Stroke::new(1.0, theme::chrome().line_soft),
+            Stroke::new(1.0, theme::chrome().line),
         );
         let control = theme::ui().control_height;
         let top = rect.center().y - control / 2.0;
@@ -572,7 +611,8 @@ impl Shell {
 
     /// 没有打开的笔记时，主区只给一件事：新建。
     fn start_state(&self, ui: &mut Ui, rect: Rect, output: &mut ShellOutput) {
-        let painter = ui.painter().clone();
+        // 只画在主区里：主区窄的时候宁可截断，也不能压到两边的栏上。
+        let painter = ui.painter().clone().with_clip_rect(rect);
         let anchor = egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.36);
         painter.text(
             egui::pos2(anchor.x, anchor.y),
@@ -673,10 +713,20 @@ fn toggle(width: f32, default: f32) -> f32 {
 }
 
 /// 边界在哪一侧。抓取区往栏外让，收起时也能抓到。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Side {
     Left,
     Right,
+}
+
+/// 正在拖的那条边界：起点宽度与指针累计想去的宽度。
+#[derive(Clone, Copy)]
+struct EdgeDrag {
+    side: Side,
+    /// 按下时这条栏的宽度。收起是 0。
+    start: f32,
+    /// 累计到这一刻想要的宽度，不受范围限制：判断"拖过头了"靠它。
+    want: f32,
 }
 
 /// 菜单里一项：动作 + 快捷键提示。禁用的项照样显示，只是点不动。
