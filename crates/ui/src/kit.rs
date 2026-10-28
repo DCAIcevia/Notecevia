@@ -27,6 +27,28 @@ pub const GAP: f32 = 0.0;
 /// 行里图标的框宽。图标画在框中间，文字从框后面起。
 pub const ICON_BOX: f32 = 24.0;
 
+/// 键盘焦点的框。egui 不给自绘控件画这个，所以全库只在这里画一次。
+pub fn focus_ring(ui: &Ui, rect: Rect, radius: u8) {
+    ui.painter().rect_stroke(
+        rect.shrink(1.0),
+        CornerRadius::same(radius),
+        egui::Stroke::new(1.0, theme::chrome().text_muted),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// 一段字有多宽。布局要按它先分空间，全库只问这一处，别再按字符数估。
+pub fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            FontId::proportional(size),
+            theme::chrome().text,
+        )
+        .size()
+        .x
+}
+
 /// 竖向排一列：一行一行往下给区域，放不下就停。
 pub struct Rows {
     left: f32,
@@ -97,19 +119,13 @@ pub fn row(
     let chrome = theme::chrome();
     let tokens = theme::ui();
     let response = ui.interact(rect, ui.scope_id().with(id), Sense::click());
-    let focused = response.has_focus();
-    if spec.selected {
-        painter.rect_filled(rect, CornerRadius::ZERO, chrome.selected);
-    } else if response.hovered() || focused {
-        painter.rect_filled(rect, CornerRadius::ZERO, chrome.hover);
+    // 悬停、按下、选中各自的填色只在 theme::apply 里定一次，这里只问当前是哪种。
+    let visuals = ui.style().interact_selectable(&response, spec.selected);
+    if spec.selected || response.hovered() || response.has_focus() {
+        painter.rect_filled(rect, CornerRadius::ZERO, visuals.weak_bg_fill);
     }
-    if focused {
-        painter.rect_stroke(
-            rect.shrink(1.0),
-            CornerRadius::ZERO,
-            egui::Stroke::new(1.0, chrome.text_muted),
-            egui::StrokeKind::Inside,
-        );
+    if response.has_focus() {
+        focus_ring(ui, rect, 0);
     }
     let mut left = rect.min.x + INSET;
     if let Some(icon) = spec.icon {
@@ -128,7 +144,7 @@ pub fn row(
     let mut actions_left = rect.max.x - INSET;
     let mut action_rects = Vec::new();
     for (index, label) in spec.actions.iter().enumerate().rev() {
-        let width = label_width(ui, label, tokens.meta);
+        let width = text_width(ui, label, tokens.meta);
         actions_left -= width;
         action_rects.push((
             index,
@@ -145,7 +161,7 @@ pub fn row(
         actions_left
     };
     if !spec.meta.is_empty() {
-        let meta_width = label_width(ui, spec.meta, tokens.meta);
+        let meta_width = text_width(ui, spec.meta, tokens.meta);
         painter.text(
             egui::pos2(text_right, rect.center().y),
             Align2::RIGHT_CENTER,
@@ -202,22 +218,17 @@ pub enum Tone {
 
 /// 文字按钮：没有底色，只换字色；键盘焦点画框。
 pub fn text_button(ui: &mut Ui, rect: Rect, label: &str, tone: Tone) -> Response {
-    let chrome = theme::chrome();
-    let colour = match tone {
-        Tone::Quiet => chrome.text_muted,
-        Tone::Danger => chrome.danger,
+    let tokens = theme::ui();
+    let text = match tone {
+        // 字色不写死：静着是灰的，悬停变深，都由主题管。
+        Tone::Quiet => RichText::new(label).size(tokens.meta),
+        Tone::Danger => RichText::new(label)
+            .size(tokens.meta)
+            .color(theme::chrome().danger),
     };
-    let response = ui.put(
-        rect,
-        Button::new(RichText::new(label).size(theme::ui().meta).color(colour)).frame(false),
-    );
+    let response = ui.put(rect, Button::new(text).frame(false));
     if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect.shrink(1.0),
-            CornerRadius::same(theme::ui().radius_control),
-            egui::Stroke::new(1.0, chrome.text_muted),
-            egui::StrokeKind::Inside,
-        );
+        focus_ring(ui, rect, tokens.radius_control);
     }
     response
 }
@@ -227,27 +238,13 @@ pub fn chip(ui: &mut Ui, rect: Rect, label: &str, selected: bool) -> Response {
     let chrome = theme::chrome();
     let tokens = theme::ui();
     let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
+    let radius = CornerRadius::same(tokens.radius_control);
+    // 悬停的填色同样从主题取；选中用 pressed，比悬停再深一档。
+    let hover = ui.style().interact(&response).weak_bg_fill;
     let painter = ui.painter();
-    if selected {
-        painter.rect_filled(
-            rect,
-            CornerRadius::same(tokens.radius_control),
-            chrome.pressed,
-        );
-    } else if response.hovered() {
-        painter.rect_filled(
-            rect,
-            CornerRadius::same(tokens.radius_control),
-            chrome.hover,
-        );
-    }
+    painter.rect_filled(rect, radius, if selected { chrome.pressed } else { hover });
     if response.has_focus() {
-        painter.rect_stroke(
-            rect.shrink(1.0),
-            CornerRadius::same(tokens.radius_control),
-            egui::Stroke::new(1.0, chrome.text_muted),
-            egui::StrokeKind::Inside,
-        );
+        focus_ring(ui, rect, tokens.radius_control);
     }
     let colour = if selected || response.hovered() {
         chrome.text
@@ -280,18 +277,6 @@ pub fn field(ui: &mut Ui, rect: Rect, text: &mut String, hint: &str) {
             .frame(egui::Frame::NONE)
             .font(FontId::proportional(tokens.meta + 0.5)),
     );
-}
-
-/// 文字宽度：布局要按它先分空间。
-fn label_width(ui: &Ui, label: &str, size: f32) -> f32 {
-    ui.painter()
-        .layout_no_wrap(
-            label.to_owned(),
-            FontId::proportional(size),
-            theme::chrome().text,
-        )
-        .size()
-        .x
 }
 
 #[cfg(test)]

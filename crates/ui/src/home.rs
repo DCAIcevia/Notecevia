@@ -287,7 +287,8 @@ fn head_row(ui: &mut Ui, query: &mut String, action: &mut Option<HomeAction>) {
     let (_, row) = ui.allocate_space(vec2(ui.available_width(), TOP_BAR_HEIGHT));
     let control = theme::ui().control_height;
     let inner = row.shrink2(Vec2::new(
-        theme::ui().gap_m,
+        // 与下面行的文字同一条左边线：搜索框和内缩对不齐最扎眼。
+        theme::ui().gap_l,
         (TOP_BAR_HEIGHT - control) / 2.0,
     ));
     let plus = Rect::from_center_size(
