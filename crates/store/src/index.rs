@@ -11,10 +11,11 @@
 //! 一致性在每次打开工作区后第一次用到时校验一次；运行期间外部改动要重新打开才能发现。
 
 use std::cell::Ref;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::time::UNIX_EPOCH;
 
+use notecevia_core::BlockKind;
 use notecevia_core::board::{Board, Body, Document};
 
 use crate::cbor::{self, Value};
@@ -28,7 +29,8 @@ pub(crate) const INDEX_FILE: &str = "index.cbor";
 ///
 /// 2：可搜索片段加入表格单元格文字与媒体块文件名，旧索引必须重建。
 /// 3：校验从逐板文件指纹改成 boards/ 目录时间 + 画板数，旧索引必须重建。
-const INDEX_FORMAT: i64 = 3;
+/// 4：加了一张媒体表（资源库用），旧索引必须重建。
+pub(crate) const INDEX_FORMAT: i64 = 4;
 
 /// 列表页的一行。正文不在这里，点开才读。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,6 +41,20 @@ pub struct BoardInfo {
     /// Unix 秒。
     pub updated_at: i64,
     pub entry_count: usize,
+}
+
+/// 资源库里的一份媒体。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaInfo {
+    /// 内容哈希，也是媒体池里的文件名。
+    pub hash: String,
+    /// 图片、视频或音频。
+    pub kind: BlockKind,
+    /// 原文件名。多处引用时取第一个非空的。
+    pub name: String,
+    pub bytes: u64,
+    /// 有几张画板在用它。
+    pub boards: usize,
 }
 
 /// 一条搜索命中。
@@ -143,9 +159,24 @@ impl IndexedBoard {
     }
 }
 
+/// 索引里的一条媒体：一份内容一条，按内容哈希认。
+#[derive(Clone, Debug)]
+pub(crate) struct IndexedMedia {
+    /// 界面上显示的名字。多处引用时取第一个非空的。
+    pub name: String,
+    /// 图片、视频或音频。
+    pub kind: BlockKind,
+    /// media/ 里那份文件的大小。读不到是 0。
+    pub bytes: u64,
+    /// 引用它的画板。空了就从表里删掉。
+    pub boards: BTreeSet<u64>,
+}
+
 /// 整份索引：画板编号 → 条目，外加 boards/ 目录的指纹。
 pub(crate) struct Index {
     pub boards: BTreeMap<u64, IndexedBoard>,
+    /// 资源库：工作区里被引用过的媒体。
+    pub media: BTreeMap<String, IndexedMedia>,
     /// boards/ 目录的修改时间（Unix 纳秒）。新增/删除/改名会变，原地覆盖不会。
     boards_mtime: Option<i64>,
 }
@@ -164,6 +195,15 @@ impl Index {
                 ),
             ),
         ];
+        pairs.push((
+            "media",
+            Value::Array(
+                self.media
+                    .iter()
+                    .map(|(hash, media)| media.to_value(hash))
+                    .collect(),
+            ),
+        ));
         if let Some(mtime) = self.boards_mtime {
             pairs.push(("boards_mtime", Value::Integer(mtime)));
         }
@@ -181,10 +221,85 @@ impl Index {
             let id = u64::try_from(id).ok()?;
             map.insert(id, IndexedBoard::from_value(board)?);
         }
+        let mut media = BTreeMap::new();
+        for item in value
+            .get("media")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some((hash, entry)) = IndexedMedia::from_value(item) {
+                media.insert(hash, entry);
+            }
+        }
         Some(Self {
             boards: map,
+            media,
             boards_mtime: value.get("boards_mtime").and_then(Value::as_integer),
         })
+    }
+}
+
+impl IndexedMedia {
+    fn to_value(&self, hash: &str) -> Value {
+        Value::map(vec![
+            ("hash", Value::text(hash)),
+            (
+                "kind",
+                Value::Integer(integer_of(self.kind.number() as u64)),
+            ),
+            ("name", Value::text(self.name.clone())),
+            ("bytes", Value::Integer(integer_of(self.bytes))),
+            (
+                "boards",
+                Value::Array(
+                    self.boards
+                        .iter()
+                        .map(|id| Value::Integer(integer_of(*id)))
+                        .collect(),
+                ),
+            ),
+        ])
+    }
+
+    /// 读一条媒体；哈希或种类不认就整条丢掉，不影响别的条目。
+    fn from_value(value: &Value) -> Option<(String, Self)> {
+        let hash = value.get("hash").and_then(Value::as_text)?.to_owned();
+        let kind = value.get("kind").and_then(Value::as_integer)?;
+        let kind = BlockKind::ALL
+            .into_iter()
+            .find(|candidate| candidate.number() == kind)?;
+        if !kind.is_media() {
+            return None;
+        }
+        let boards = value
+            .get("boards")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_integer)
+                    .filter_map(|id| u64::try_from(id).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some((
+            hash,
+            Self {
+                name: value
+                    .get("name")
+                    .and_then(Value::as_text)
+                    .unwrap_or_default()
+                    .to_owned(),
+                kind,
+                bytes: value
+                    .get("bytes")
+                    .and_then(Value::as_integer)
+                    .and_then(|bytes| u64::try_from(bytes).ok())
+                    .unwrap_or(0),
+                boards,
+            },
+        ))
     }
 }
 
@@ -213,6 +328,32 @@ impl Workspace {
                 .then_with(|| right.id.cmp(&left.id))
         });
         Ok(boards)
+    }
+
+    /// 资源库：工作区里被画板引用过的媒体，按名字排，同名的按哈希。
+    ///
+    /// 只列"还在用"的：媒体池里的孤儿文件不回收，但没有名字也没有出处，
+    /// 摆到资源库里对用户没意义。
+    pub fn list_media(&self) -> Result<Vec<MediaInfo>, Error> {
+        let index = self.ensure_index()?;
+        let mut media: Vec<MediaInfo> = index
+            .media
+            .iter()
+            .map(|(hash, item)| MediaInfo {
+                hash: hash.clone(),
+                kind: item.kind,
+                name: item.name.clone(),
+                bytes: item.bytes,
+                boards: item.boards.len(),
+            })
+            .collect();
+        media.sort_by(|left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then_with(|| left.hash.cmp(&right.hash))
+        });
+        Ok(media)
     }
 
     /// 在标题、标签和文本块正文里找。大小写不敏感；空查询给空结果。
@@ -309,29 +450,39 @@ impl Workspace {
             texts: searchable_texts(&document.board, &document.bodies),
             readable: true,
         };
-        self.store_entry(board_id, entry)
+        let media = board_media(&document.board, &document.bodies);
+        self.store_entry(board_id, entry, media)
     }
 
     /// 画板文件刚被别处写完（比如容器导入）时，按盘上的内容补一条索引。
     pub(crate) fn remember_board_from_disk(&self, board_id: u64) -> Result<(), Error> {
         self.ensure_index()?;
-        let entry = match self.read_board_lenient(board_id)? {
+        let (entry, media) = match self.read_board_lenient(board_id)? {
             Some(on_disk) => {
                 let bodies = self.load_bodies(board_id, &on_disk);
-                indexed_board(&on_disk, &bodies, self.thumbnail_path(board_id).is_file())
+                (
+                    indexed_board(&on_disk, &bodies, self.thumbnail_path(board_id).is_file()),
+                    board_media(&on_disk.board, &bodies),
+                )
             }
-            None => IndexedBoard::broken(),
+            None => (IndexedBoard::broken(), Vec::new()),
         };
-        self.store_entry(board_id, entry)
+        self.store_entry(board_id, entry, media)
     }
 
-    fn store_entry(&self, board_id: u64, entry: IndexedBoard) -> Result<(), Error> {
+    fn store_entry(
+        &self,
+        board_id: u64,
+        entry: IndexedBoard,
+        media: Vec<(String, BlockKind, String)>,
+    ) -> Result<(), Error> {
         let value = {
             let mut guard = self.index.borrow_mut();
             let Some(index) = guard.as_mut() else {
                 return Ok(());
             };
             index.boards.insert(board_id, entry);
+            self.refresh_media(index, board_id, media);
             // 写盘会新建/改名画板文件，目录时间跟着变；记下写入后的值。
             index.boards_mtime = self.boards_modified();
             index.to_value()
@@ -347,9 +498,12 @@ impl Workspace {
             let Some(index) = guard.as_mut() else {
                 return Ok(());
             };
-            if index.boards.remove(&board_id).is_none() {
-                return Ok(());
+            index.boards.remove(&board_id);
+            // 它引用过的媒体跟着摘掉；没人用了就从资源库里消失。
+            for item in index.media.values_mut() {
+                item.boards.remove(&board_id);
             }
+            index.media.retain(|_, item| !item.boards.is_empty());
             index.boards_mtime = self.boards_modified();
             index.to_value()
         };
@@ -412,10 +566,23 @@ impl Workspace {
         // 先记目录时间再读文件：读的过程中有外部改动，目录时间会再变，下次校验能发现。
         let boards_mtime = self.boards_modified();
         let mut boards = BTreeMap::new();
+        let mut media = BTreeMap::new();
         for id in self.board_ids()? {
             let board = match self.read_board_lenient(id)? {
                 Some(on_disk) => {
                     let bodies = self.load_bodies(id, &on_disk);
+                    for (hash, kind, name) in board_media(&on_disk.board, &bodies) {
+                        let item = media.entry(hash).or_insert_with(|| IndexedMedia {
+                            name: String::new(),
+                            kind,
+                            bytes: 0,
+                            boards: BTreeSet::new(),
+                        });
+                        if item.name.is_empty() && !name.is_empty() {
+                            item.name = name;
+                        }
+                        item.boards.insert(id);
+                    }
                     indexed_board(&on_disk, &bodies, self.thumbnail_path(id).is_file())
                 }
                 // 画板文件读不懂：留占位让集合对得上，列表与搜索跳过它。
@@ -423,10 +590,54 @@ impl Workspace {
             };
             boards.insert(id, board);
         }
+        // 大小来自媒体池里那份文件：一份内容只 stat 一次。
+        for (hash, item) in media.iter_mut() {
+            item.bytes = self.media_size(hash);
+        }
         Ok(Index {
             boards,
+            media,
             boards_mtime,
         })
+    }
+
+    /// media/ 里那份文件有多少字节；读不到给 0，界面显示"不知道"。
+    fn media_size(&self, hash: &str) -> u64 {
+        self.media_file(hash)
+            .and_then(|path| fs::metadata(path).ok())
+            .map(|meta| meta.len())
+            .unwrap_or(0)
+    }
+
+    /// 把一张画板对媒体的引用换成新的：先摘掉旧的，再接上新的。
+    ///
+    /// 没有人引用的媒体从表里删掉：媒体池里的文件不回收，但资源库只列"还在用"的。
+    fn refresh_media(
+        &self,
+        index: &mut Index,
+        board_id: u64,
+        media: Vec<(String, BlockKind, String)>,
+    ) {
+        for item in index.media.values_mut() {
+            item.boards.remove(&board_id);
+        }
+        index.media.retain(|_, item| !item.boards.is_empty());
+        for (hash, kind, name) in media {
+            let bytes = self.media_size(&hash);
+            let item = index.media.entry(hash).or_insert_with(|| IndexedMedia {
+                name: String::new(),
+                kind,
+                bytes: 0,
+                boards: BTreeSet::new(),
+            });
+            if item.name.is_empty() && !name.is_empty() {
+                item.name = name;
+            }
+            if bytes > 0 {
+                item.bytes = bytes;
+            }
+            item.boards.insert(board_id);
+        }
     }
 
     fn write_index(&self, index: &Index) -> Result<(), Error> {
@@ -453,6 +664,23 @@ fn indexed_board(
         texts: searchable_texts(&on_disk.board, bodies),
         readable: true,
     }
+}
+
+/// 一张画板引用的媒体：内容哈希、种类、名字。按目录顺序，重复的哈希只算一次。
+fn board_media(board: &Board, bodies: &BTreeMap<u64, Body>) -> Vec<(String, BlockKind, String)> {
+    let mut media: Vec<(String, BlockKind, String)> = Vec::new();
+    for entry in &board.entries {
+        let (hash, name) = match bodies.get(&entry.id) {
+            Some(Body::Image(block)) if !block.media.is_empty() => (&block.media, &block.name),
+            Some(Body::Media(block)) if !block.media.is_empty() => (&block.media, &block.name),
+            _ => continue,
+        };
+        if media.iter().any(|(seen, _, _)| seen == hash) {
+            continue;
+        }
+        media.push((hash.clone(), entry.kind, name.clone()));
+    }
+    media
 }
 
 /// 一张画板里能搜的文字，按目录顺序：文本块正文、表格单元格、媒体块文件名。
