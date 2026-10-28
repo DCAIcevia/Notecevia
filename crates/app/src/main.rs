@@ -96,6 +96,10 @@ impl notecevia_ui::window::WindowHooks for Hooks {
         self.0.and_then(|native| native.cursor_position())
     }
 
+    fn primary_button_down(&self) -> Option<bool> {
+        self.0.map(|native| native.primary_button_down())
+    }
+
     fn show_system_menu(&self, x: f32, y: f32) -> bool {
         self.0
             .is_some_and(|native| native.show_system_menu(x as i32, y as i32))

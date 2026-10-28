@@ -21,6 +21,8 @@ const WM_SYSCOMMAND: u32 = 0x0112;
 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 const DWMWCP_ROUND: i32 = 2;
 
+const VK_LBUTTON: i32 = 0x01;
+
 const SW_MAXIMIZE: i32 = 3;
 const SW_RESTORE: i32 = 9;
 
@@ -51,6 +53,7 @@ unsafe extern "system" {
     fn PostMessageW(window: *mut c_void, message: u32, wparam: usize, lparam: isize) -> i32;
     fn ShowWindow(window: *mut c_void, command: i32) -> i32;
     fn GetCursorPos(point: *mut Point) -> i32;
+    fn GetAsyncKeyState(key: i32) -> i16;
 }
 
 #[repr(C)]
@@ -186,4 +189,13 @@ pub fn cursor_position() -> Option<Point> {
     // SAFETY: 传入的是本栈上的有效结构体指针。
     let ok = unsafe { GetCursorPos(&mut point) };
     (ok != 0).then_some(point)
+}
+/// 鼠标左键此刻是不是真的按着。问系统，不信任何缓存。
+///
+/// 拖动窗口的过程中窗口本身在动，抬起事件有可能到不了应用；
+/// 只看应用记的状态会让"正在拖"永远清不掉，表现就是松手之后还跟着鼠标。
+pub fn primary_button_down() -> bool {
+    // SAFETY: 只查询按键状态，没有内存操作。
+    let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
+    (state as u16 & 0x8000) != 0
 }

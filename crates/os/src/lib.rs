@@ -52,6 +52,11 @@ impl Native {
         Some((point.x as f32, point.y as f32))
     }
 
+    /// 物理上鼠标左键还按着吗。
+    pub fn primary_button_down(&self) -> bool {
+        windows::primary_button_down()
+    }
+
     /// 在指针处弹出系统窗口菜单。
     pub fn show_system_menu(&self, x: i32, y: i32) -> bool {
         windows::show_system_menu(self.hwnd, x, y)
@@ -77,6 +82,11 @@ impl Native {
 
     /// 这个平台没有实现窗口行为。
     pub fn allow_resize(&self) -> bool {
+        false
+    }
+
+    /// 这个平台没有实现窗口行为。
+    pub fn primary_button_down(&self) -> bool {
         false
     }
 

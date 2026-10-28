@@ -12,6 +12,9 @@ pub trait WindowHooks {
     /// 在屏幕坐标处弹出系统窗口菜单。标题栏里没有控件的地方右键就该出这个。
     fn show_system_menu(&self, x: f32, y: f32) -> bool;
 
+    /// 物理上鼠标左键还按着吗。窗口被搬动时抬起事件可能丢失，得问系统。
+    fn primary_button_down(&self) -> Option<bool>;
+
     /// 指针的屏幕坐标，按界面点数算。
     ///
     /// 必须问系统要，不能用"窗口局部坐标加窗口位置"去算：窗口自己在动的时候，
@@ -32,6 +35,10 @@ impl WindowHooks for () {
     }
 
     fn cursor_position(&self) -> Option<(f32, f32)> {
+        None
+    }
+
+    fn primary_button_down(&self) -> Option<bool> {
         None
     }
 

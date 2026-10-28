@@ -736,17 +736,27 @@ impl Shell {
         let Some((start, grab, direction)) = self.window_resize else {
             return;
         };
-        // 指针位置问系统要：窗口自己在动，用局部坐标算会形成回路。
+        // 松手判定问系统：窗口在拖动中被搬动时，抬起事件可能到不了应用，
+        // 只看应用记的状态会让"正在拖"永远清不掉——表现就是松手之后尺寸还跟着鼠标走。
+        let down = hooks
+            .primary_button_down()
+            .unwrap_or_else(|| ui.ctx().input(|input| input.pointer.any_down()));
+        if !down {
+            self.window_resize = None;
+            return;
+        }
+        // 指针位置也问系统要：窗口自己在动，用局部坐标算会形成回路。
         if let Some(now) = cursor_points(ui, hooks) {
             let delta = Vec2::new(now.0 - grab.0, now.1 - grab.1);
             let rect = resized(start, delta, direction);
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::OuterPosition(rect.min));
+            // 位置只在真的会变的时候才发：拉右边、下边时位置不动，发了只会让窗口
+            // 白跑一次 set_outer_position——那一步最容易把鼠标捕获搞掉。
+            if rect.min != start.min {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::OuterPosition(rect.min));
+            }
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::InnerSize(rect.size()));
-        }
-        if !ui.ctx().input(|input| input.pointer.any_down()) {
-            self.window_resize = None;
         }
     }
 
