@@ -10,6 +10,7 @@ use notecevia_core::BlockKind;
 use crate::board::BoardApp;
 use crate::home::{HomeAction, HomeApp};
 use crate::icons::{self, Icon};
+use crate::layout::{self, Layout};
 use crate::library::{Library, LibraryAction};
 use crate::strings;
 use crate::theme;
@@ -20,16 +21,15 @@ pub const TOP_BAR_HEIGHT: f32 = 48.0;
 pub const TOOLBAR_HEIGHT: f32 = 44.0;
 /// 最左图标条宽。
 pub const RAIL_WIDTH: f32 = 52.0;
-/// 左侧边栏宽。
-pub const LIST_WIDTH: f32 = 264.0;
-/// 右侧资源栏宽。
-pub const ASSETS_WIDTH: f32 = 280.0;
 /// 图标条里按钮的边长与圆角。
 const RAIL_BUTTON: f32 = 36.0;
 /// 图标在按钮里留多少边：36 的按钮画 20 的图标，纯图标的栏不能再小。
 const RAIL_ICON_PAD: f32 = 8.0;
 const RAIL_RADIUS: u8 = 8;
-/// 顶栏里搜索框的宽。
+/// 顶栏左上角那个标记的边长。
+const MARK: f32 = 22.0;
+/// 面板边界上能抓住的那条宽。抓区偏向外侧，别压住栏里的滚动条。
+const GRAB: f32 = 6.0;
 /// 资源栏里一行的行高。
 const ASSET_ROW: f32 = 30.0;
 
@@ -86,13 +86,17 @@ pub struct ShellOutput {
     pub library: Option<LibraryAction>,
     /// 菜单栏按出来的命令。
     pub menu: Option<MenuCommand>,
+    /// 面板宽度定下来了，该写回文件。只在松手之后给一次。
+    pub layout: Option<Layout>,
 }
 
-/// 外壳自己的界面状态：搜索词与两块面板的开合。与笔记数据无关。
+/// 外壳自己的界面状态：搜索词、两块的宽度与当前视图。与笔记数据无关。
 pub struct Shell {
     query: String,
-    list_open: bool,
-    assets_open: bool,
+    /// 两条面板的宽度，0 表示收起。拖过就记进 ui.json。
+    layout: Layout,
+    /// 宽度改过、还没写回文件。
+    layout_dirty: bool,
     view: ViewMode,
 }
 
@@ -104,10 +108,15 @@ impl Default for Shell {
 
 impl Shell {
     pub fn new() -> Self {
+        Self::with_layout(Layout::default())
+    }
+
+    /// 用存下来的宽度起外壳。文件里没有就按默认。
+    pub fn with_layout(layout: Layout) -> Self {
         Self {
             query: String::new(),
-            list_open: true,
-            assets_open: true,
+            layout,
+            layout_dirty: false,
             view: ViewMode::Page,
         }
     }
@@ -131,14 +140,16 @@ impl Shell {
 
         let top = Rect::from_min_size(full.min, Vec2::new(full.width(), TOP_BAR_HEIGHT));
         self.top_bar(ui, top, board.is_some(), &mut output);
-        // 视图菜单只翻外壳自己的开关，不用惊动 app。
+        // 视图菜单只翻外壳自己的开关，不用惊动 app。宽度一改就要落盘。
         match output.menu {
             Some(MenuCommand::ToggleList) => {
-                self.list_open = !self.list_open;
+                self.layout.list = toggle(self.layout.list, layout::LIST_DEFAULT);
+                self.layout_dirty = true;
                 output.menu = None;
             }
             Some(MenuCommand::ToggleAssets) => {
-                self.assets_open = !self.assets_open;
+                self.layout.assets = toggle(self.layout.assets, layout::ASSETS_DEFAULT);
+                self.layout_dirty = true;
                 output.menu = None;
             }
             _ => {}
@@ -188,48 +199,76 @@ impl Shell {
                 output.view = Some(mode);
             }
         }
-        // 底部的两个收起键：纯图标栏的惯例位置，不占顶栏，也不跟视图混在一起。
-        for (index, (icon, tip, open)) in [
-            (Icon::PanelLeft, strings::SHELL_TOGGLE_LIST, self.list_open),
-            (
-                Icon::PanelRight,
-                strings::SHELL_TOGGLE_ASSETS,
-                self.assets_open,
-            ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let rect = Rect::from_center_size(
-                egui::pos2(
-                    rail.center().x,
-                    rail.max.y
-                        - theme::ui().gap_m
-                        - RAIL_BUTTON / 2.0
-                        - index as f32 * (RAIL_BUTTON + 2.0),
-                ),
-                Vec2::splat(RAIL_BUTTON),
+        // 两条面板的边界就是把手：拖动改宽度，拖到底收起，从收起里拖回来重新打开。
+        // 抓区先登记，栏里的控件就能压在它上面——贴着内边缘的滚动条不该被边界抢走。
+        // 窗口窄了就按可用宽度收一收：画的宽度与抓取的位置都取收过的值，存的值不动。
+        let (list_width, assets_width) = layout::fit(
+            self.layout.list,
+            self.layout.assets,
+            body.width() - RAIL_WIDTH,
+        );
+        let list_edge = rail.max.x + list_width;
+        let assets_edge = body.max.x - assets_width;
+        let list_grab = grab_strip(ui, body, list_edge, Side::Left, "shell-grab-list");
+        let assets_grab = (self.view == ViewMode::Page)
+            .then(|| grab_strip(ui, body, assets_edge, Side::Right, "shell-grab-assets"));
+        let list_grab_held = list_grab.hovered() || list_grab.dragged();
+        if list_grab.dragged() {
+            self.layout.list = layout::drag_width(
+                list_width,
+                list_grab.drag_delta().x,
+                layout::LIST_MIN,
+                layout::LIST_MAX,
             );
-            if self.rail_toggle(ui, rect, icon, tip) {
-                if index == 0 {
-                    self.list_open = !open;
-                } else {
-                    self.assets_open = !open;
-                }
+            self.layout_dirty = true;
+        }
+        if list_grab.double_clicked() {
+            self.layout.list = layout::LIST_DEFAULT;
+            self.layout_dirty = true;
+        }
+        let mut assets_grab_held = false;
+        if let Some(grab) = &assets_grab {
+            assets_grab_held = grab.hovered() || grab.dragged();
+            if grab.dragged() {
+                // 右栏的边界和外框反着走：往左拖才是变宽。
+                self.layout.assets = layout::drag_width(
+                    assets_width,
+                    -grab.drag_delta().x,
+                    layout::ASSETS_MIN,
+                    layout::ASSETS_MAX,
+                );
+                self.layout_dirty = true;
             }
+            if grab.double_clicked() {
+                self.layout.assets = layout::ASSETS_DEFAULT;
+                self.layout_dirty = true;
+            }
+        }
+        // 收起的那条没有自己的分隔线，悬停时补一条：不然没人知道这儿能拉出来。
+        for (width, edge, held) in [
+            (list_width, list_edge, list_grab_held),
+            (assets_width, assets_edge, assets_grab_held),
+        ] {
+            if width > 0.0 || !held {
+                continue;
+            }
+            painter.line_segment(
+                [egui::pos2(edge, body.min.y), egui::pos2(edge, body.max.y)],
+                boundary_stroke(true),
+            );
         }
 
         // 左侧边栏：笔记列表，由 HomeApp 画内容。
         let mut main_left = rail.max.x;
-        if self.list_open {
+        if list_width > 0.0 {
             let list = Rect::from_min_size(
                 egui::pos2(rail.max.x, body.min.y),
-                Vec2::new(LIST_WIDTH, body.height()),
+                Vec2::new(list_width, body.height()),
             );
             painter.rect_filled(list, CornerRadius::ZERO, theme::chrome().panel);
             painter.line_segment(
                 [list.right_top(), list.right_bottom()],
-                Stroke::new(1.0, theme::chrome().line),
+                boundary_stroke(list_grab_held),
             );
             match self.view {
                 ViewMode::Volume => {
@@ -250,19 +289,19 @@ impl Shell {
 
         // 右侧资源栏：只有页视图才有"这一篇的媒体"。
         let mut main_right = body.max.x;
-        if self.view == ViewMode::Page && self.assets_open {
+        if self.view == ViewMode::Page && assets_width > 0.0 {
             let assets = board
                 .as_ref()
                 .map(|board| board.assets())
                 .unwrap_or_default();
             let panel = Rect::from_min_size(
-                egui::pos2(body.max.x - ASSETS_WIDTH, body.min.y),
-                Vec2::new(ASSETS_WIDTH, body.height()),
+                egui::pos2(body.max.x - assets_width, body.min.y),
+                Vec2::new(assets_width, body.height()),
             );
             painter.rect_filled(panel, CornerRadius::ZERO, theme::chrome().panel);
             painter.line_segment(
                 [panel.left_top(), panel.left_bottom()],
-                Stroke::new(1.0, theme::chrome().line),
+                boundary_stroke(assets_grab_held),
             );
             self.assets_panel(ui, panel, &assets);
             main_right = panel.min.x;
@@ -298,15 +337,41 @@ impl Shell {
                 }
             }
         }
+        // 拖动中不写文件：每帧都写既慢也没意义，松手才算摆完了。
+        if self.layout_dirty && !ui.ctx().input(|input| input.pointer.any_down()) {
+            self.layout.settle();
+            self.layout_dirty = false;
+            output.layout = Some(self.layout);
+        }
         output
     }
 
-    /// 顶栏：左折叠与菜单，右搜索与折叠资源栏。
+    /// 顶栏：左边是标记，接着是菜单。右边留白，菜单不顶到窗口边上。
     fn top_bar(&mut self, ui: &mut Ui, rect: Rect, has_note: bool, output: &mut ShellOutput) {
-        // 顶栏只剩菜单：搜索搬进了左侧边栏，收起键搬到了图标条底部。
+        let painter = ui.painter().clone();
+        // 标记落在图标条那一列里：和下面那条竖栏是一条线。
+        let mark = Rect::from_center_size(
+            egui::pos2(rect.min.x + RAIL_WIDTH / 2.0, rect.center().y),
+            Vec2::splat(MARK),
+        );
+        painter.rect_filled(mark, CornerRadius::same(6), theme::chrome().text);
+        // 近黑方块里一个白 n，和窗口图标同一个记号。不另放图片，放大缩小都不糊。
+        icons::draw(
+            &painter,
+            mark.shrink(5.0),
+            Icon::Mark,
+            theme::chrome().window,
+        );
+
+        // 菜单与左栏里的内容同一条竖线：对齐表示它们是一路的。
+        // 竖向按一行字算：上下都居中，别贴着栏顶。
+        // 一行菜单按钮实际多高：按钮字高加上下内边距，照着它居中就不会贴顶。
+        let row =
+            ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0;
+        let left = rect.min.x + RAIL_WIDTH + theme::ui().gap_m;
         let menus = Rect::from_min_max(
-            egui::pos2(rect.min.x + theme::ui().gap_s, rect.min.y + 4.0),
-            egui::pos2(rect.max.x - theme::ui().gap_m, rect.max.y - 4.0),
+            egui::pos2(left, rect.center().y - row / 2.0),
+            egui::pos2(rect.max.x - theme::ui().gap_m, rect.center().y + row / 2.0),
         );
         self.menu_bar(ui, menus, has_note, output);
     }
@@ -446,10 +511,21 @@ impl Shell {
                     }
                 });
                 ui.menu_button(strings::MENU_VIEW, |ui| {
-                    if menu_item(ui, strings::MENU_HIDE_LIST, "", true) {
+                    // 文案跟着当前状态走：按钮收起来了，菜单上就该写着展开。
+                    let list = if self.layout.list_open() {
+                        strings::MENU_HIDE_LIST
+                    } else {
+                        strings::MENU_SHOW_LIST
+                    };
+                    if menu_item(ui, list, "", true) {
                         output.menu = Some(MenuCommand::ToggleList);
                     }
-                    if menu_item(ui, strings::MENU_HIDE_ASSETS, "", true) {
+                    let assets = if self.layout.assets_open() {
+                        strings::MENU_HIDE_ASSETS
+                    } else {
+                        strings::MENU_SHOW_ASSETS
+                    };
+                    if menu_item(ui, assets, "", true) {
                         output.menu = Some(MenuCommand::ToggleAssets);
                     }
                 });
@@ -591,22 +667,43 @@ impl Shell {
         };
         response.on_hover_text(tip).clicked()
     }
+}
 
-    /// 图标条底部的收起键：悬停出底，图标比视图键浅一档。
-    fn rail_toggle(&self, ui: &mut Ui, rect: Rect, icon: Icon, label: &str) -> bool {
-        let response = ui.interact(rect, ui.scope_id().with(label), Sense::click());
-        let painter = ui.painter();
-        if response.hovered() {
-            painter.rect_filled(rect, CornerRadius::same(RAIL_RADIUS), theme::chrome().hover);
-        }
-        let color = if response.hovered() {
-            theme::chrome().text
-        } else {
-            theme::chrome().text_faint
-        };
-        icons::draw(painter, rect.shrink(RAIL_ICON_PAD), icon, color);
-        response.on_hover_text(label).clicked()
+/// 面板边界上的抓取区。偏向外侧多让几像素：收起的栏也得抓得着。
+fn grab_strip(ui: &mut Ui, body: Rect, edge: f32, side: Side, id: &str) -> egui::Response {
+    let (left, right) = match side {
+        Side::Left => (edge - 1.0, edge + GRAB - 1.0),
+        Side::Right => (edge - GRAB + 1.0, edge + 1.0),
+    };
+    let rect = Rect::from_min_max(egui::pos2(left, body.min.y), egui::pos2(right, body.max.y));
+    let response = ui.interact(rect, ui.scope_id().with(id), Sense::click_and_drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
+    response.on_hover_text(strings::SHELL_RESIZE)
+}
+
+/// 面板边界那条线：平时是普通分隔线，指针落在抓取区里就亮一档。
+///
+/// 只换颜色不加粗：边界的位置不能因为悬停而变。
+fn boundary_stroke(active: bool) -> Stroke {
+    if active {
+        Stroke::new(1.0, theme::chrome().text_faint)
+    } else {
+        Stroke::new(1.0, theme::chrome().line)
+    }
+}
+
+/// 菜单里的收起与展开：宽度是 0 就是收起。
+fn toggle(width: f32, default: f32) -> f32 {
+    if width > 0.0 { 0.0 } else { default }
+}
+
+/// 边界在哪一侧。抓取区往栏外让，收起时也能抓到。
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
 }
 
 /// 文件大小只留一位小数，够看就行。

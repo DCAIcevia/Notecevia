@@ -13,6 +13,7 @@ use notecevia_core::volume::EMPTY_BOOK_ID;
 use notecevia_core::{BlockKind, Document};
 use notecevia_store::Workspace;
 use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
+use notecevia_ui::layout::{Layout, LayoutSource};
 use notecevia_ui::library::{Library, LibraryAction, PageRow, VolumeRow};
 use notecevia_ui::media::MediaSource;
 use notecevia_ui::shell::{MenuCommand, Shell, ViewMode};
@@ -61,6 +62,17 @@ impl notecevia_ui::theme::ThemeSource for FileTheme {
     }
 }
 
+/// 界面布局文件：放在工作区根目录的 ui.json。拖过的栏宽下次打开还在。
+struct FileLayout {
+    path: PathBuf,
+}
+
+impl LayoutSource for FileLayout {
+    fn layout_text(&self) -> Option<String> {
+        std::fs::read_to_string(&self.path).ok()
+    }
+}
+
 /// 首页要缩略图时才去读盘，不把一万张图塞进内存。
 struct DiskThumbnails {
     dir: PathBuf,
@@ -76,8 +88,10 @@ struct App {
     workspace: Option<Workspace>,
     home: HomeApp,
     board: Option<BoardApp>,
-    /// 外壳：顶栏、两条侧栏与资源栏的开合状态。
+    /// 外壳：顶栏、两条侧栏与资源栏的宽度。
     shell: Shell,
+    /// 界面布局文件的位置。拿到路径才写盘。
+    layout_path: Option<PathBuf>,
     /// 上一次设过的窗口标题，变了才发命令。
     window_title: Option<String>,
     /// 册视图的状态：册列表与目录。
@@ -132,12 +146,13 @@ struct App {
 }
 
 impl App {
-    fn new(shot: Option<PathBuf>) -> Self {
+    fn new(shot: Option<PathBuf>, layout: Layout) -> Self {
         Self {
             workspace: None,
             home: HomeApp::new(),
             board: None,
-            shell: Shell::new(),
+            shell: Shell::with_layout(layout),
+            layout_path: None,
             window_title: None,
             library: Library::new(EMPTY_BOOK_ID),
             volume_id: EMPTY_BOOK_ID,
@@ -174,6 +189,18 @@ impl App {
             board.set_status(text);
         } else {
             self.home.set_status(text);
+        }
+    }
+
+    /// 面板宽度摆完了就写回 ui.json。
+    ///
+    /// 写不进去只影响下次打开的宽度，不当错误报给用户：这不是内容。
+    fn save_layout(&mut self, layout: Layout) {
+        let Some(path) = &self.layout_path else {
+            return;
+        };
+        if let Err(error) = std::fs::write(path, layout.to_json()) {
+            eprintln!("界面布局写不进去：{error}");
         }
     }
 
@@ -931,6 +958,9 @@ impl eframe::App for App {
             Some(&mut self.library),
             self.board.as_mut(),
         );
+        if let Some(layout) = output.layout {
+            self.save_layout(layout);
+        }
         if output.new_note {
             self.create_board();
         }
@@ -1060,7 +1090,7 @@ impl eframe::App for App {
     }
 }
 
-/// 应用图标：近黑方块里一个白色小写 n。界面里不再重复摆这个标记。
+/// 应用图标：近黑方块里一个白色小写 n。顶栏左上角那个标记与它同一个形状。
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// 把图标 PNG 解成 egui 要的 RGBA。
@@ -1157,10 +1187,15 @@ fn main() -> eframe::Result {
             });
             let _ = theme::install(theme);
             theme::apply(&cc.egui_ctx);
+            let layout_path = root.join("ui.json");
+            let (layout, layout_warning) = notecevia_ui::layout::load(&FileLayout {
+                path: layout_path.clone(),
+            });
 
             let opened_at;
             let listed_at;
-            let mut app = App::new(shot.clone());
+            let mut app = App::new(shot.clone(), layout);
+            app.layout_path = Some(layout_path);
             app.thumbnail_check = thumbnail_check;
             app.image_check = image_check;
             app.export_check = export_check;
@@ -1196,6 +1231,10 @@ fn main() -> eframe::Result {
             if let Some(warning) = theme_warning {
                 eprintln!("主题文件读不了，改用内置浅色：{warning}");
                 app.home.set_error(warning);
+            }
+            // 布局文件坏了不值得打扰：退回默认宽度，只在终端说一句。
+            if let Some(warning) = layout_warning {
+                eprintln!("界面布局读不了，改用默认宽度：{warning}");
             }
 
             if timing {

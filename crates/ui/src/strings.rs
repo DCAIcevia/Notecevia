@@ -169,10 +169,8 @@ pub const REFRESHED: &str = "列表已刷新";
 pub const BRAND: &str = "Notecevia";
 /// 外壳：搜索框占位。
 pub const SHELL_SEARCH: &str = "搜索";
-/// 外壳：收起左侧边栏。
-pub const SHELL_TOGGLE_LIST: &str = "收起左侧边栏";
-/// 外壳：收起资源栏。
-pub const SHELL_TOGGLE_ASSETS: &str = "收起资源栏";
+/// 外壳：面板边界上的提示。线一亮就能拖，双击回到默认宽。
+pub const SHELL_RESIZE: &str = "拖动调整宽度，双击复位";
 /// 外壳：没有打开的笔记。
 pub const SHELL_NO_NOTE: &str = "还没有打开的笔记";
 /// 外壳：新建笔记。
@@ -225,6 +223,8 @@ pub const MENU_SELECT_ALL: &str = "全选";
 pub const MENU_CLEAR_SELECT: &str = "取消选择";
 pub const MENU_HIDE_LIST: &str = "收起左侧边栏";
 pub const MENU_HIDE_ASSETS: &str = "收起资源栏";
+pub const MENU_SHOW_LIST: &str = "展开左侧边栏";
+pub const MENU_SHOW_ASSETS: &str = "展开资源栏";
 pub const MENU_ABOUT: &str = "关于 Notecevia";
 
 /// 关于：只在状态行显示一次。

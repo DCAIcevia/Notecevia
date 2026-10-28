@@ -27,6 +27,8 @@ pub enum Icon {
     Table,
     Audio,
     Play,
+    /// 顶栏左上角那个记号：小写 n，和窗口图标同一套形状。
+    Mark,
 }
 
 /// 把图标画在 `rect` 里。`rect` 应当是个正方形。
@@ -189,6 +191,17 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 vec![p(0.4, 0.28), p(0.72, 0.5), p(0.4, 0.72)],
                 color,
                 Stroke::NONE,
+            ));
+        }
+        Icon::Mark => {
+            // 两竖加一段肩：小写 n 的全部特征，再多的笔画在 20 点里也糊了。
+            line(p(0.32, 0.78), p(0.32, 0.46));
+            line(p(0.68, 0.78), p(0.68, 0.46));
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [p(0.32, 0.46), p(0.32, 0.22), p(0.68, 0.22), p(0.68, 0.46)],
+                false,
+                Color32::TRANSPARENT,
+                stroke,
             ));
         }
     }
