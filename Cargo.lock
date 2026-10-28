@@ -1936,14 +1936,23 @@ dependencies = [
  "egui",
  "image",
  "notecevia-core",
+ "notecevia-os",
  "notecevia-store",
  "notecevia-ui",
+ "raw-window-handle",
  "rfd",
 ]
 
 [[package]]
 name = "notecevia-core"
 version = "0.2.0-alpha.1"
+
+[[package]]
+name = "notecevia-os"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "raw-window-handle",
+]
 
 [[package]]
 name = "notecevia-store"

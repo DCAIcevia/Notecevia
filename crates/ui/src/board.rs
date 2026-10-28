@@ -624,7 +624,7 @@ impl BoardApp {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        let palette = theme::palette(ui.visuals().dark_mode);
+        let palette = theme::palette();
         // 主区整块都是画布：工具栏已经提到外壳里，全局一条。
         let canvas = ui.max_rect();
         self.canvas = canvas;

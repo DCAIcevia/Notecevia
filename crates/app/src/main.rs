@@ -20,6 +20,7 @@ use notecevia_ui::media_panel::{MediaAction, MediaKind, MediaPanel, MediaRow};
 use notecevia_ui::shell::{MenuCommand, Shell, ViewMode};
 use notecevia_ui::trash::{TrashAction, TrashKind, TrashRow, TrashView};
 use notecevia_ui::{BoardApp, strings, theme};
+use raw_window_handle::HasWindowHandle;
 
 /// 自动保存的间隔，秒。改动一直在就按这个节奏落盘。
 const AUTOSAVE_SECONDS: f64 = 2.0;
@@ -86,6 +87,20 @@ impl ThumbnailSource for DiskThumbnails {
     }
 }
 
+/// 界面要的那几件窗口行为的实现。只把平台层包一下，不把平台类型漏给界面。
+#[derive(Clone, Copy)]
+struct Hooks(Option<notecevia_os::Native>);
+
+impl notecevia_ui::window::WindowHooks for Hooks {
+    fn toggle_maximize(&self) -> Option<bool> {
+        self.0.and_then(|native| native.toggle_maximize())
+    }
+
+    fn is_maximized(&self) -> Option<bool> {
+        self.0.and_then(|native| native.is_maximized())
+    }
+}
+
 struct App {
     workspace: Option<Workspace>,
     home: HomeApp,
@@ -100,6 +115,10 @@ struct App {
     layout_path: Option<PathBuf>,
     /// 上一次设过的窗口标题，变了才发命令。
     window_title: Option<String>,
+    /// 平台窗口层。拿不到就是没有：界面会退回 egui 的通用命令。
+    native: Option<notecevia_os::Native>,
+    /// 已经试过接平台层。只试一次，免得每帧都试。
+    native_ready: bool,
     /// 册视图的状态：册列表与目录。
     library: Library,
     /// 当前打开的册。默认是 Empty book。
@@ -162,6 +181,8 @@ impl App {
             media: MediaPanel::new(),
             layout_path: None,
             window_title: None,
+            native: None,
+            native_ready: false,
             library: Library::new(EMPTY_BOOK_ID),
             volume_id: EMPTY_BOOK_ID,
             view: ViewMode::Page,
@@ -1085,7 +1106,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.timing && !self.timed {
             self.timed = true;
@@ -1093,6 +1114,21 @@ impl eframe::App for App {
         }
         self.collect_frame_stats(&ctx);
         self.take_capture_result();
+        // 平台层接一次。接不上就把系统标题栏放回来：宁可多一条栏，
+        // 也不能留一个拖不动、拉不了边的窗口给用户。
+        if !self.native_ready {
+            self.native_ready = true;
+            match frame.window_handle() {
+                Ok(handle) => match notecevia_os::Native::attach(handle.as_raw()) {
+                    Some(native) => {
+                        native.allow_resize();
+                        self.native = Some(native);
+                    }
+                    None => ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true)),
+                },
+                Err(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true)),
+            }
+        }
         let new_note_key =
             ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N));
         // 界不读时钟：这里把"现在"递进去，列表才好写"3 分钟前"。
@@ -1107,6 +1143,9 @@ impl eframe::App for App {
             _ if self.view == ViewMode::Trash => format!("{} — Notecevia", strings::TRASH_TITLE),
             _ => "Notecevia".to_owned(),
         };
+        // 系统标题栏没了，同一个名字要写在两处：系统那份给任务栏与 Alt+Tab，
+        // 界面这份给窗口里看得见的那行。少了后者，用户认不出自己开着哪一页。
+        self.shell.set_title(title.clone());
         if self.window_title.as_deref() != Some(title.as_str()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = Some(title);
@@ -1126,14 +1165,15 @@ impl eframe::App for App {
             }
         }
 
-        let output = self.shell.ui(
-            ui,
-            &mut self.home,
-            Some(&mut self.library),
-            &mut self.trash,
-            &mut self.media,
-            self.board.as_mut(),
-        );
+        let hooks = Hooks(self.native);
+        let views = notecevia_ui::shell::Views {
+            home: &mut self.home,
+            library: Some(&mut self.library),
+            trash: &mut self.trash,
+            media_panel: &mut self.media,
+            board: self.board.as_mut(),
+        };
+        let output = self.shell.ui(ui, &hooks, views);
         if let Some(layout) = output.layout {
             self.save_layout(layout);
         }
@@ -1324,7 +1364,6 @@ fn board_item(info: notecevia_store::BoardInfo) -> BoardItem {
 
 fn main() -> eframe::Result {
     let mut shot = None;
-    let mut dark = false;
     let mut stress = false;
     let mut edit = false;
     let mut select = false;
@@ -1344,7 +1383,6 @@ fn main() -> eframe::Result {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--shot") => shot = args.next().map(PathBuf::from),
-            Some("--dark") => dark = true,
             Some("--stress") => stress = true,
             Some("--edit") => edit = true,
             Some("--select") => select = true,
@@ -1375,7 +1413,10 @@ fn main() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(notecevia_ui::window_title())
         .with_inner_size(size.unwrap_or([1280.0, 760.0]))
-        .with_min_inner_size([720.0, 420.0]);
+        .with_min_inner_size([720.0, 420.0])
+        // 外面那层系统标题栏不要：头部自己画，品牌只出现一次。
+        // 拖动、拉边、最大化由 notecevia-os 补回来，接不上会自动退回系统标题栏。
+        .with_decorations(false);
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }
@@ -1388,9 +1429,6 @@ fn main() -> eframe::Result {
         "Notecevia",
         options,
         Box::new(move |cc| {
-            if dark {
-                cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
-            }
             if let Some(zoom) = zoom {
                 cc.egui_ctx.set_zoom_factor(zoom);
             }

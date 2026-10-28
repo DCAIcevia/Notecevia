@@ -14,7 +14,10 @@ use std::sync::OnceLock;
 
 use egui::{Color32, CornerRadius, Stroke};
 
-/// 一套画布配色。浅色与深色都要成立，界面代码只取这里的值。
+/// 一套画布配色。界面代码只取这里的值。
+///
+/// 只有浅色一套。深色不是这里的另一个分支：它要重新定层级手段、悬停方向与每个
+/// 语义色的对比，等于重做一套主题，单独做，不跟着浅色顺手长出来。
 pub struct Palette {
     pub canvas: Color32,
     pub block_fill: Color32,
@@ -64,29 +67,16 @@ pub const TEXT_COLORS: [[u8; 3]; 7] = [
     [124, 92, 214],
 ];
 
-pub fn palette(dark: bool) -> Palette {
-    if dark {
-        Palette {
-            canvas: Color32::from_rgb(24, 24, 27),
-            block_fill: Color32::from_rgb(33, 33, 37),
-            media_fill: Color32::from_rgb(43, 43, 48),
-            edge: Color32::from_rgb(52, 52, 58),
-            hover_edge: Color32::from_rgb(78, 78, 86),
-            text: Color32::from_rgb(233, 233, 236),
-            muted: Color32::from_rgb(142, 142, 150),
-            danger: Color32::from_rgb(236, 122, 122),
-        }
-    } else {
-        Palette {
-            canvas: Color32::from_rgb(242, 242, 244),
-            block_fill: Color32::from_rgb(255, 255, 255),
-            media_fill: Color32::from_rgb(235, 235, 238),
-            edge: Color32::from_rgb(224, 224, 229),
-            hover_edge: Color32::from_rgb(196, 196, 203),
-            text: Color32::from_rgb(28, 28, 31),
-            muted: Color32::from_rgb(110, 110, 118),
-            danger: Color32::from_rgb(178, 42, 42),
-        }
+pub fn palette() -> Palette {
+    Palette {
+        canvas: Color32::from_rgb(242, 242, 244),
+        block_fill: Color32::from_rgb(255, 255, 255),
+        media_fill: Color32::from_rgb(235, 235, 238),
+        edge: Color32::from_rgb(224, 224, 229),
+        hover_edge: Color32::from_rgb(196, 196, 203),
+        text: Color32::from_rgb(28, 28, 31),
+        muted: Color32::from_rgb(110, 110, 118),
+        danger: Color32::from_rgb(178, 42, 42),
     }
 }
 
@@ -98,7 +88,8 @@ pub fn palette(dark: bool) -> Palette {
 pub struct Chrome {
     pub window: Color32,
     pub panel: Color32,
-    pub rail: Color32,
+    /// 岛与岛之间露出来的那层底。所有分界都由它承担，不画线。
+    pub ground: Color32,
     pub line: Color32,
     pub line_soft: Color32,
     pub text: Color32,
@@ -143,7 +134,7 @@ pub fn light() -> Theme {
         chrome: Chrome {
             window: Color32::from_rgb(255, 255, 255),
             panel: Color32::from_rgb(250, 250, 251),
-            rail: Color32::from_rgb(239, 239, 242),
+            ground: Color32::from_rgb(232, 232, 236),
             line: Color32::from_rgb(232, 232, 236),
             line_soft: Color32::from_rgb(239, 238, 242),
             text: Color32::from_rgb(23, 23, 26),
@@ -260,7 +251,7 @@ fn apply_token(theme: &mut Theme, key: &str, value: &json::Value) -> Result<(), 
     match key {
         "chrome.window" => chrome.window = colour(value, key)?,
         "chrome.panel" => chrome.panel = colour(value, key)?,
-        "chrome.rail" => chrome.rail = colour(value, key)?,
+        "chrome.ground" => chrome.ground = colour(value, key)?,
         "chrome.line" => chrome.line = colour(value, key)?,
         "chrome.line_soft" => chrome.line_soft = colour(value, key)?,
         "chrome.text" => chrome.text = colour(value, key)?,
@@ -377,6 +368,11 @@ pub fn apply(ctx: &egui::Context) {
     style.spacing.item_spacing = egui::vec2(ui.gap_m, ui.gap_s);
     style.spacing.button_padding = egui::vec2(ui.gap_m, 4.0);
     style.spacing.interact_size.y = ui.control_height;
+    // 深色要单独做，不能在浅色里顺手带出来。做出来之前这一层锁住：
+    // 两种外观都用这套浅色。egui 默认跟随系统，只压浅色的话，系统是深色的机器上
+    // 只有 egui 自带的控件会变深，自绘的面板、行、文字仍是浅色，同一屏两套配色。
+    // 真做深色时，先在这里解开，再按深色重定令牌，不要改这里的映射。
+    ctx.set_style_of(egui::Theme::Dark, style.clone());
     ctx.set_style_of(egui::Theme::Light, style);
 }
 

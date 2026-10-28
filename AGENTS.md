@@ -46,8 +46,11 @@ cargo test --workspace
 | `crates/core` | `notecevia-core` | 领域逻辑与用例 |
 | `crates/store` | `notecevia-store` | 文件读写与索引 |
 | `crates/ui` | `notecevia-ui` | 状态映射成界面 |
+| `crates/os` | `notecevia-os` | 系统窗口行为：无边框窗口的拖动、拉边、最大化 |
 | `crates/app` | `notecevia-app` | 组装与入口 |
 
-依赖单向：`app` → `store`、`ui`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
+依赖单向：`app` → `store`、`ui`、`os`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。`ui` 不认识 `os`：界面只说"开始拖动""切最大化"，由 `app` 把两者接起来。
 
-每个 crate 顶部有 `#![forbid(unsafe_code)]` 与 `#![deny(rustdoc::broken_intra_doc_links)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。
+每个 crate 顶部有 `#![deny(rustdoc::broken_intra_doc_links)]`，`crates/os` 以外的 crate 另有 `#![forbid(unsafe_code)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。
+
+`crates/os` 是全库唯一允许 `unsafe` 的地方：窗口句柄、窗口样式的读写只能直接调系统接口。它对外只暴露"能不能做"的布尔与选项，平台没有实现就返回否，界面退回 egui 自己的通用命令——所以这一层缺了，窗口仍然能用。
