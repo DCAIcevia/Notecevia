@@ -33,8 +33,6 @@ const HEADER_GAP: f32 = 16.0;
 const ISLAND_GAP: f32 = 6.0;
 /// 窗口边缘到岛的留白。
 const ISLAND_MARGIN: f32 = 6.0;
-/// 窗口四个角的圆角。Windows 11 的窗口是 8，这里跟着系统走。
-const WINDOW_RADIUS: f32 = 8.0;
 /// 全局工具栏高。横贯整窗，放在菜单栏下面。
 pub const TOOLBAR_HEIGHT: f32 = 44.0;
 /// 最左图标条宽。
@@ -139,8 +137,8 @@ pub struct Shell {
     layout_dirty: bool,
     /// 正在拖的那条边界。拖的时候只跟指针走，松手才决定收不收。
     drag: Option<EdgeDrag>,
-    /// 正在拖窗口：按下时的窗口左上角与指针，都在屏幕坐标里。
-    window_drag: Option<(egui::Pos2, egui::Pos2)>,
+    /// 正在改窗口大小：按下时的外框、指针屏幕坐标，以及从哪条边改。
+    window_resize: Option<(Rect, (f32, f32), egui::ResizeDirection)>,
     /// 标题。系统标题栏没了，文档名只剩这一处能看见。
     title: String,
     view: ViewMode,
@@ -164,7 +162,7 @@ impl Shell {
             layout,
             layout_dirty: false,
             drag: None,
-            window_drag: None,
+            window_resize: None,
             title: String::new(),
             view: ViewMode::Page,
         }
@@ -193,12 +191,8 @@ impl Shell {
         let painter = ui.painter().clone();
         let radius = CornerRadius::same(theme::ui().radius_surface);
         // 岛与岛之间露出来的那层底：分界全交给它，不再画线。
-        // 圆角画在这张底上：窗口本身是方的，四角靠透明透出桌面。
-        painter.rect_filled(
-            full,
-            CornerRadius::same(WINDOW_RADIUS as u8),
-            theme::chrome().ground,
-        );
+        // 窗口圆角由 DWM 裁，这里画满整块，不要自己用透明去抠。
+        painter.rect_filled(full, CornerRadius::ZERO, theme::chrome().ground);
 
         let header = Rect::from_min_max(
             full.min + Vec2::splat(ISLAND_MARGIN),
@@ -207,7 +201,7 @@ impl Shell {
                 full.min.y + ISLAND_MARGIN + HEADER_HEIGHT,
             ),
         );
-        self.resize_edges(ui, full);
+        self.resize_edges(ui, full, hooks);
         self.header(ui, header, board.is_some(), hooks, &mut output);
         // 视图菜单只翻外壳自己的开关，不用惊动 app。宽度一改就要落盘。
         match output.menu {
@@ -499,27 +493,17 @@ impl Shell {
             ui.scope_id().with("shell-drag"),
             Sense::click_and_drag(),
         );
-        // 拖动自己算：每帧按指针走了多少发一个位置命令。交给系统的移动循环更"原生"，
-        // 但那段时间应用不再出帧，画面是冻的——这就是之前不跟手的原因。
+        // 拖动交给系统：窗口整个一起搬，没有内容要重画，所以不存在帧间错位，
+        // 手指到哪窗口到哪；顺带把贴边吸附也拿回来。自己逐帧发位置会落后一帧，
+        // 手感是"追着指针跑"。
         if drag.drag_started() {
-            self.window_drag = grab_window(ui);
-        }
-        if drag.dragged()
-            && let (Some((start, grab)), Some(pointer)) = (self.window_drag, screen_pointer(ui))
-        {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::OuterPosition(
-                    start + (pointer - grab),
-                ));
-        }
-        if drag.drag_stopped() {
-            self.window_drag = None;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
         // 微软的标题栏规范：没有交互元素的地方右键出系统窗口菜单。
         if drag.secondary_clicked()
-            && let Some(pointer) = screen_pointer(ui)
+            && let Some((x, y)) = cursor_points(ui, hooks)
         {
-            hooks.show_system_menu(pointer.x, pointer.y);
+            hooks.show_system_menu(x, y);
         }
         if drag.double_clicked() && hooks.toggle_maximize().is_none() {
             let maximized = self.maximized(ui, hooks);
@@ -659,7 +643,7 @@ impl Shell {
     /// 岛的留白就是窗口的边框：贴着留白拖就是改窗口大小。
     ///
     /// 这几条窄带全在卡的圆角外面，所以不会抢走任何内容的点击。
-    fn resize_edges(&self, ui: &mut Ui, full: Rect) {
+    fn resize_edges(&mut self, ui: &mut Ui, full: Rect, hooks: &dyn WindowHooks) {
         let band = ISLAND_MARGIN + 2.0;
         let corner = ISLAND_MARGIN + 6.0;
         let edges = [
@@ -737,13 +721,32 @@ impl Shell {
             if response.hovered() || response.dragged() {
                 ui.ctx().set_cursor_icon(cursor);
             }
-            // 缩放交给系统的 DRAG_RESIZE。它拖动期间会让画面停更，但尺寸由系统算，
-            // 不会和我们自己发的尺寸命令互相打架——手算那次窗口被撑到 8000 多像素，
-            // 直接把绘制后端顶崩了。宁可钝一点，不能崩。
-            if response.hovered() && ui.ctx().input(|input| input.pointer.primary_pressed()) {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+            // 自己算尺寸，逐帧发命令：系统的 DRAG_RESIZE 是一个模态循环，
+            // 那段时间应用完全不出帧，你看到的是旧画面被系统拉着走——
+            // 正是"鼠标过去了内容还在原地、然后猛地跳一下"那种残影。
+            if response.drag_started()
+                && let (Some(outer), Some(start)) = (
+                    ui.ctx().input(|input| input.viewport().outer_rect),
+                    cursor_points(ui, hooks),
+                )
+            {
+                self.window_resize = Some((outer, start, direction));
             }
+        }
+        let Some((start, grab, direction)) = self.window_resize else {
+            return;
+        };
+        // 指针位置问系统要：窗口自己在动，用局部坐标算会形成回路。
+        if let Some(now) = cursor_points(ui, hooks) {
+            let delta = Vec2::new(now.0 - grab.0, now.1 - grab.1);
+            let rect = resized(start, delta, direction);
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::OuterPosition(rect.min));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::InnerSize(rect.size()));
+        }
+        if !ui.ctx().input(|input| input.pointer.any_down()) {
+            self.window_resize = None;
         }
     }
 
@@ -978,21 +981,59 @@ impl Shell {
     }
 }
 
-/// 指针在屏幕上的位置。
+/// 指针在屏幕上的位置，按界面点数算。
 ///
-/// 局部坐标加上窗口左上角：窗口跟着指针走的时候，只有屏幕坐标能用来算位移，
-/// 用局部坐标会和窗口自己的移动互相抵消。
-fn screen_pointer(ui: &Ui) -> Option<egui::Pos2> {
-    let (local, inner) = ui
-        .ctx()
-        .input(|input| (input.pointer.interact_pos(), input.viewport().inner_rect));
-    Some(inner?.min + egui::vec2(local?.x, local?.y))
+/// 问系统要，不拿窗口局部坐标换算：窗口自己在动，局部坐标会跟着变，
+/// 用它算位移就成了回路，尺寸能一路滚到把绘制后端撑崩。
+fn cursor_points(ui: &Ui, hooks: &dyn WindowHooks) -> Option<(f32, f32)> {
+    let (x, y) = hooks.cursor_position()?;
+    let scale = ui.ctx().pixels_per_point();
+    Some((x / scale, y / scale))
 }
 
-/// 按下拖动时记下两个起点：窗口在哪、指针在哪。
-fn grab_window(ui: &Ui) -> Option<(egui::Pos2, egui::Pos2)> {
-    let outer = ui.ctx().input(|input| input.viewport().outer_rect)?;
-    Some((outer.min, screen_pointer(ui)?))
+/// 窗口最小尺寸。比这个再小就没法用了。
+const MIN_WINDOW_WIDTH: f32 = 720.0;
+const MIN_WINDOW_HEIGHT: f32 = 420.0;
+
+/// 按拖了多少算出新的窗口外框。动哪条边由方向决定，另一边保持不动。
+fn resized(start: Rect, delta: Vec2, direction: egui::ResizeDirection) -> Rect {
+    use egui::ResizeDirection as Direction;
+    let moves_left = matches!(
+        direction,
+        Direction::West | Direction::NorthWest | Direction::SouthWest
+    );
+    let moves_top = matches!(
+        direction,
+        Direction::North | Direction::NorthWest | Direction::NorthEast
+    );
+    let moves_right = matches!(
+        direction,
+        Direction::East | Direction::NorthEast | Direction::SouthEast
+    );
+    let moves_bottom = matches!(
+        direction,
+        Direction::South | Direction::SouthWest | Direction::SouthEast
+    );
+    let mut min = start.min;
+    let mut max = start.max;
+    if moves_left {
+        min.x += delta.x;
+    }
+    if moves_right {
+        max.x += delta.x;
+    }
+    if moves_top {
+        min.y += delta.y;
+    }
+    if moves_bottom {
+        max.y += delta.y;
+    }
+    // 最小尺寸由这里兜：动的那条边推回去，对面那条边不动。
+    let width = (max.x - min.x).max(MIN_WINDOW_WIDTH);
+    let height = (max.y - min.y).max(MIN_WINDOW_HEIGHT);
+    let left = if moves_left { max.x - width } else { min.x };
+    let top = if moves_top { max.y - height } else { min.y };
+    Rect::from_min_size(egui::pos2(left, top), Vec2::new(width, height))
 }
 /// 面板边界上的抓取区。偏向外侧多让几像素：收起的栏也得抓得着。
 fn grab_strip(ui: &mut Ui, body: Rect, edge: f32, side: Side, id: &str) -> egui::Response {

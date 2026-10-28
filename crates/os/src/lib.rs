@@ -41,6 +41,17 @@ impl Native {
         windows::allow_resize(self.hwnd)
     }
 
+    /// 请 DWM 给窗口画圆角。
+    pub fn round_window_corners(&self) -> bool {
+        windows::round_window_corners(self.hwnd)
+    }
+
+    /// 指针的屏幕坐标，逻辑点。
+    pub fn cursor_position(&self) -> Option<(f32, f32)> {
+        let point = windows::cursor_position()?;
+        Some((point.x as f32, point.y as f32))
+    }
+
     /// 在指针处弹出系统窗口菜单。
     pub fn show_system_menu(&self, x: i32, y: i32) -> bool {
         windows::show_system_menu(self.hwnd, x, y)
@@ -67,6 +78,16 @@ impl Native {
     /// 这个平台没有实现窗口行为。
     pub fn allow_resize(&self) -> bool {
         false
+    }
+
+    /// 这个平台没有实现窗口行为。
+    pub fn round_window_corners(&self) -> bool {
+        false
+    }
+
+    /// 这个平台没有实现窗口行为。
+    pub fn cursor_position(&self) -> Option<(f32, f32)> {
+        None
     }
 
     /// 这个平台没有实现窗口行为。

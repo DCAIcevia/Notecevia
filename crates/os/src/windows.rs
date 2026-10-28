@@ -18,6 +18,9 @@ const TPM_RETURNCMD: u32 = 0x0100;
 const TPM_NONOTIFY: u32 = 0x0080;
 const WM_SYSCOMMAND: u32 = 0x0112;
 
+const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+const DWMWCP_ROUND: i32 = 2;
+
 const SW_MAXIMIZE: i32 = 3;
 const SW_RESTORE: i32 = 9;
 
@@ -47,6 +50,24 @@ unsafe extern "system" {
     ) -> i32;
     fn PostMessageW(window: *mut c_void, message: u32, wparam: usize, lparam: isize) -> i32;
     fn ShowWindow(window: *mut c_void, command: i32) -> i32;
+    fn GetCursorPos(point: *mut Point) -> i32;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    fn DwmSetWindowAttribute(
+        window: *mut c_void,
+        attribute: u32,
+        value: *const c_void,
+        size: u32,
+    ) -> i32;
 }
 
 /// 句柄非零才当成窗口。句柄由 eframe 持有，在本进程存活期间一直有效。
@@ -133,4 +154,36 @@ pub fn show_system_menu(hwnd: isize, x: i32, y: i32) -> bool {
         }
     }
     true
+}
+/// 请 DWM 给窗口画圆角。
+///
+/// 微软推荐的做法：无边框窗口不要自己用透明去抠圆角，那样新画的区域还没上色时
+/// 会透出黑色，拖动时也容易拖影。圆角与阴影本来就该由 DWM 负责。
+pub fn round_window_corners(hwnd: isize) -> bool {
+    let Some(window) = window_of(hwnd) else {
+        return false;
+    };
+    let preference = DWMWCP_ROUND;
+    // SAFETY: 句柄由 eframe 持有；传的是本栈上的 i32，长度也如实给 4 字节。
+    // Windows 10 上这个属性不被识别，返回失败，窗口保持方角，不影响其它行为。
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&preference as *const i32).cast(),
+            core::mem::size_of::<i32>() as u32,
+        )
+    };
+    result == 0
+}
+
+/// 指针在屏幕上的位置，物理像素。
+///
+/// 问系统要，不要拿窗口局部坐标换算：窗口自己在动的时候，局部坐标会跟着变，
+/// 用它算位移会形成回路，尺寸能一路滚到把绘制后端撑崩。
+pub fn cursor_position() -> Option<Point> {
+    let mut point = Point { x: 0, y: 0 };
+    // SAFETY: 传入的是本栈上的有效结构体指针。
+    let ok = unsafe { GetCursorPos(&mut point) };
+    (ok != 0).then_some(point)
 }
