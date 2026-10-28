@@ -178,13 +178,6 @@ impl TrashView {
                 FontId::proportional(tokens.empty),
                 chrome.text_muted,
             );
-            painter.text(
-                egui::pos2(anchor.x, anchor.y + 26.0),
-                Align2::CENTER_CENTER,
-                strings::trash_empty_hint(self.keep_days),
-                FontId::proportional(tokens.meta),
-                chrome.text_faint,
-            );
             return action;
         }
 

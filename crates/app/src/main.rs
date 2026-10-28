@@ -1297,6 +1297,13 @@ fn is_blank_note(board: &BoardApp) -> bool {
         && !board.is_dirty()
 }
 
+/// 解析 "宽x高" 这样的窗口尺寸，给检查界面用。
+fn parse_size(value: &std::ffi::OsStr) -> Option<[f32; 2]> {
+    let text = value.to_str()?;
+    let (width, height) = text.split_once(['x', 'X'])?;
+    Some([width.parse().ok()?, height.parse().ok()?])
+}
+
 /// 现在的 Unix 秒。界面不读时钟，时间由这里递进去。
 fn now_seconds() -> i64 {
     SystemTime::now()
@@ -1330,6 +1337,9 @@ fn main() -> eframe::Result {
     let mut timing = false;
     let mut frame_stats = None;
     let mut nudge = false;
+    // 检查界面的小窗口与大字：--size 900x520、--zoom 1.5。
+    let mut size: Option<[f32; 2]> = None;
+    let mut zoom: Option<f32> = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -1346,6 +1356,12 @@ fn main() -> eframe::Result {
             Some("--export-all") => export_check = true,
             Some("--timing") => timing = true,
             Some("--nudge") => nudge = true,
+            Some("--size") => size = args.next().and_then(|value| parse_size(&value)),
+            Some("--zoom") => {
+                zoom = args
+                    .next()
+                    .and_then(|value| value.to_str().and_then(|text| text.parse().ok()));
+            }
             Some("--frame-stats") => {
                 frame_stats = args
                     .next()
@@ -1358,7 +1374,7 @@ fn main() -> eframe::Result {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(notecevia_ui::window_title())
-        .with_inner_size([1280.0, 760.0])
+        .with_inner_size(size.unwrap_or([1280.0, 760.0]))
         .with_min_inner_size([720.0, 420.0]);
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
@@ -1374,6 +1390,9 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             if dark {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+            }
+            if let Some(zoom) = zoom {
+                cc.egui_ctx.set_zoom_factor(zoom);
             }
             let root = notecevia_store::workspace_root();
             let (theme, theme_warning) = theme::load(&FileTheme {

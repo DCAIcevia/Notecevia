@@ -236,10 +236,10 @@ impl MediaPanel {
         let top = rect.min.y + HEAD + FILTER;
         let shown: Vec<MediaRow> = self.visible().cloned().collect();
         if shown.is_empty() {
-            let (title, hint) = if self.rows.is_empty() {
-                (strings::MEDIA_EMPTY, strings::MEDIA_EMPTY_HINT)
+            let title = if self.rows.is_empty() {
+                strings::MEDIA_EMPTY
             } else {
-                (strings::MEDIA_NO_MATCH, strings::MEDIA_NO_MATCH_HINT)
+                strings::MEDIA_NO_MATCH
             };
             let anchor = egui::pos2(rect.center().x, top + 48.0);
             painter.text(
@@ -248,13 +248,6 @@ impl MediaPanel {
                 title,
                 FontId::proportional(tokens.body),
                 chrome.text_muted,
-            );
-            painter.text(
-                egui::pos2(anchor.x, anchor.y + 22.0),
-                Align2::CENTER_CENTER,
-                hint,
-                FontId::proportional(tokens.meta),
-                chrome.text_faint,
             );
             return action;
         }
