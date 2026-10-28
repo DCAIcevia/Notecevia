@@ -171,6 +171,28 @@ pub const BRAND: &str = "Notecevia";
 pub const SHELL_SEARCH: &str = "搜索";
 /// 外壳：面板边界上的提示。线一亮就能拖，双击回到默认宽。
 pub const SHELL_RESIZE: &str = "拖动调整宽度，双击复位";
+/// 资源栏。
+pub const MEDIA_IMPORT: &str = "导入";
+pub const MEDIA_SEARCH: &str = "搜索资源";
+pub const MEDIA_ALL: &str = "全部";
+pub const MEDIA_IMAGE: &str = "图片";
+pub const MEDIA_VIDEO: &str = "视频";
+pub const MEDIA_AUDIO: &str = "音频";
+pub const MEDIA_EMPTY: &str = "还没有资源";
+pub const MEDIA_EMPTY_HINT: &str = "点「导入」把文件加进来";
+pub const MEDIA_NO_MATCH: &str = "没有匹配的资源";
+pub const MEDIA_NO_MATCH_HINT: &str = "换个词或者换个筛选";
+pub const MEDIA_NEEDS_NOTE: &str = "先打开一篇笔记再放资源";
+
+/// 导入了几个文件。
+pub fn media_imported(count: usize) -> String {
+    format!("已导入 {count} 个文件")
+}
+
+pub fn media_list_failed(error: impl std::fmt::Display) -> String {
+    format!("资源库读不出来：{error}")
+}
+
 /// 回收站：标题（图标条上的提示也用它）。
 pub const TRASH_TITLE: &str = "回收站";
 pub const TRASH_EMPTY_TITLE: &str = "回收站是空的";
@@ -225,8 +247,6 @@ pub fn trash_list_failed(error: impl std::fmt::Display) -> String {
 pub const SHELL_NO_NOTE: &str = "还没有打开的笔记";
 /// 外壳：新建笔记。
 pub const SHELL_NEW_NOTE: &str = "新建笔记";
-/// 资源栏：没有资源时的拖入提示。
-pub const ASSETS_DROP: &str = "拖入文件";
 
 /// 画布栏：新建块按钮的无障碍标签。
 pub const NEW_BLOCK: &str = "新建块";

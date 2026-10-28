@@ -16,3 +16,4 @@ notecevia-ui = { path = "../ui" }
 egui.workspace = true
 eframe.workspace = true
 image.workspace = true
+rfd = "0.17.2"
