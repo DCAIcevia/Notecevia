@@ -10,6 +10,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Str
 use notecevia_core::board::{Document, Entry, TextBlock};
 use notecevia_core::{Alignment, Axis, BlockKind, Body, ImageFit, ShapeKind};
 
+use crate::kit::text_width;
 use crate::{fonts::FontLibrary, strings, theme};
 
 /// 操作条一行最宽多少；再宽就折行，不挡内容。
@@ -78,23 +79,20 @@ enum Item {
 }
 
 impl Item {
-    fn width(&self) -> f32 {
+    /// 宽度按真正画出去的那个字号量，量多少就占多少，不留估算的误差。
+    fn width(&self, ui: &egui::Ui) -> f32 {
+        let tokens = theme::ui();
         match self {
-            Self::Action { label, .. } => label_width(label),
-            Self::Step { .. } => theme::ui().control_height,
-            Self::Colour { .. } => theme::ui().control_height,
+            Self::Action { label, .. } => {
+                (text_width(ui, label, theme::SMALL_FONT) + tokens.gap_m + tokens.gap_s)
+                    .max(tokens.control_height)
+            }
+            Self::Step { .. } => tokens.control_height,
+            Self::Colour { .. } => tokens.control_height,
             Self::Font { .. } => 86.0,
             Self::Opacity { .. } => 104.0,
         }
     }
-}
-
-fn label_width(label: &str) -> f32 {
-    let text: f32 = label
-        .chars()
-        .map(|character| if character.is_ascii() { 7.0 } else { 12.0 })
-        .sum();
-    (text + 12.0).max(theme::ui().control_height)
 }
 
 fn action(label: &'static str, command: Command) -> Item {
@@ -270,7 +268,7 @@ fn draw_items(
     let mut x = 0.0;
     let mut width: f32 = 0.0;
     for item in &items {
-        let item_width = item.width();
+        let item_width = item.width(ui);
         if x > 0.0 && x + item_width > MAX_ROW_WIDTH {
             row += 1;
             x = 0.0;
@@ -317,15 +315,13 @@ fn draw_items(
                 command,
                 active,
             } => {
-                let response =
-                    toolbar_button(ui, &painter, palette, rect, label, *active, palette.text);
+                let response = toolbar_button(ui, &painter, rect, label, *active, palette.text);
                 if response.clicked() {
                     commands.push(command.clone());
                 }
             }
             Item::Step { label, step } => {
-                let response =
-                    toolbar_button(ui, &painter, palette, rect, label, false, palette.text);
+                let response = toolbar_button(ui, &painter, rect, label, false, palette.text);
                 if response.clicked() {
                     commands.push(Command::StepTextSize(*step));
                 }
@@ -347,8 +343,7 @@ fn draw_items(
             Item::Font { current } => {
                 let label = current.as_deref().unwrap_or(strings::FONT_DEFAULT);
                 let elided = elide(label, 8);
-                let response =
-                    toolbar_button(ui, &painter, palette, rect, &elided, false, palette.text);
+                let response = toolbar_button(ui, &painter, rect, &elided, false, palette.text);
                 if response.clicked() && picker.library.is_none() {
                     // 枚举系统字体要几百毫秒，只在这一下花，不放在启动路径上。
                     *picker.library = Some(FontLibrary::load());
@@ -402,7 +397,6 @@ fn bar_position(anchor: Rect, area: Rect, width: f32, height: f32) -> (f32, f32)
 fn toolbar_button(
     ui: &egui::Ui,
     painter: &egui::Painter,
-    palette: &theme::Palette,
     rect: Rect,
     label: &str,
     active: bool,
@@ -414,12 +408,10 @@ fn toolbar_button(
         ui.scope_id().with(("toolbar-button", label)),
         Sense::click(),
     );
+    // 悬停底与其他地方同一个来源：全界面只有一种"鼠标停在这上面"的颜色。
+    let hover = ui.style().interact(&response).weak_bg_fill;
     if active || response.hovered() {
-        painter.rect_filled(
-            rect,
-            CornerRadius::same(theme::ui().radius_control),
-            palette.media_fill,
-        );
+        painter.rect_filled(rect, CornerRadius::same(theme::ui().radius_control), hover);
     }
     painter.text(
         rect.center(),
@@ -446,11 +438,8 @@ fn colour_button(
         Sense::click(),
     );
     if response.hovered() {
-        painter.rect_filled(
-            rect,
-            CornerRadius::same(theme::ui().radius_control),
-            palette.media_fill,
-        );
+        let hover = ui.style().interact(&response).weak_bg_fill;
+        painter.rect_filled(rect, CornerRadius::same(theme::ui().radius_control), hover);
     }
     paint_colour_swatch(painter, palette, rect.center(), target, current);
     response

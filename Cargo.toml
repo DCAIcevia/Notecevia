@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/store", "crates/ui", "crates/app"]
+members = [
+    "crates/core",
+    "crates/store",
+    "crates/ui",
+    "crates/os",
+    "crates/app",
+]
 
 [workspace.package]
 version = "0.2.0-alpha.1"
@@ -17,3 +23,5 @@ thiserror = "2"
 # egui 的系统字体提供者已为 yeslogic-fontconfig-sys 打开 dlopen，两个 fontique 版本共用这一个 sys crate，
 # 特性必须一致，否则 Linux 上 fontique 0.12 找不到 fontconfig 符号。
 fontique = { version = "0.12", features = ["fontconfig-dlopen"] }
+# 窗口句柄的类型来自 eframe 内部同一个版本，必须与它一致才能互相转换。
+raw-window-handle = "0.6"

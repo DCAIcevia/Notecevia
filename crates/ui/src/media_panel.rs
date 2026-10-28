@@ -171,13 +171,7 @@ impl MediaPanel {
         {
             action = Some(MediaAction::Import);
         }
-        painter.line_segment(
-            [
-                egui::pos2(rect.min.x, rect.min.y + HEAD),
-                egui::pos2(rect.max.x, rect.min.y + HEAD),
-            ],
-            egui::Stroke::new(1.0, chrome.line_soft),
-        );
+        // 搜索行与筛选行之间不画线：这一栏是一张岛，靠间距分行就够了。
 
         // 筛选：全部 / 图片 / 视频 / 音频。选中的只换底色与字色，几何不动。
         let mut x = rect.min.x + tokens.gap_m;

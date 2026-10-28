@@ -38,6 +38,9 @@ cargo test --workspace
 - 工具链由 `rust-toolchain.toml` 固定，rustup 按该文件选择版本；workspace 用 `edition = "2024"`。
 - 三条命令即 CI 门禁：推送 `main` 与合并请求时在 Ubuntu、Windows 上各跑一遍，CI 里的命令带 `--locked`；CI 另在 Linux 上构建文档并运行依赖审计。
 - 依赖审计同时由 CI 与 `.github/workflows/audit.yml` 运行：依赖清单变化时比对许可证清单，每周检查漏洞与许可证，允许列表在 `deny.toml`。
+- 界面改动跑两条本机验收（需要真实桌面，不进 CI）：
+  - `pwsh tools/ui-shots.ps1 -Capture before` 截一组，改完 `-Capture after`，再用 `-Before before -After after` 逐像素比；有差异即非零退出。
+  - `pwsh tools/window-probe.ps1` 验窗口行为：拖头部、拉边缘、松手后不再跟随、双击最大化。
 
 ## 结构
 
@@ -46,8 +49,11 @@ cargo test --workspace
 | `crates/core` | `notecevia-core` | 领域逻辑与用例 |
 | `crates/store` | `notecevia-store` | 文件读写与索引 |
 | `crates/ui` | `notecevia-ui` | 状态映射成界面 |
+| `crates/os` | `notecevia-os` | 系统窗口行为：无边框窗口的拖动、拉边、最大化 |
 | `crates/app` | `notecevia-app` | 组装与入口 |
 
-依赖单向：`app` → `store`、`ui`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
+依赖单向：`app` → `store`、`ui`、`os`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。`ui` 不认识 `os`：界面只说"开始拖动""切最大化"，由 `app` 把两者接起来。
 
-每个 crate 顶部有 `#![forbid(unsafe_code)]` 与 `#![deny(rustdoc::broken_intra_doc_links)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。
+每个 crate 顶部有 `#![deny(rustdoc::broken_intra_doc_links)]`，`crates/os` 以外的 crate 另有 `#![forbid(unsafe_code)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。
+
+`crates/os` 是全库唯一允许 `unsafe` 的地方：窗口句柄、窗口样式的读写只能直接调系统接口。它对外只暴露"能不能做"的布尔与选项，平台没有实现就返回否，界面退回 egui 自己的通用命令——所以这一层缺了，窗口仍然能用。
