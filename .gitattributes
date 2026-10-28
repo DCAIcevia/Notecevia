@@ -1,2 +1,6 @@
 * text=auto eol=lf
 THIRD_PARTY_LICENSES.md linguist-generated=true
+
+# VectorCraft 工程文件是整体重写的 JSON，按文本 diff 会把一次小改动放大成整页。
+# 按二进制跟踪：只看"变了"，不给逐行噪声。
+*.vectorcraft binary
