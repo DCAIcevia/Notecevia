@@ -38,6 +38,9 @@ cargo test --workspace
 - 工具链由 `rust-toolchain.toml` 固定，rustup 按该文件选择版本；workspace 用 `edition = "2024"`。
 - 三条命令即 CI 门禁：推送 `main` 与合并请求时在 Ubuntu、Windows 上各跑一遍，CI 里的命令带 `--locked`；CI 另在 Linux 上构建文档并运行依赖审计。
 - 依赖审计同时由 CI 与 `.github/workflows/audit.yml` 运行：依赖清单变化时比对许可证清单，每周检查漏洞与许可证，允许列表在 `deny.toml`。
+- 界面改动跑两条本机验收（需要真实桌面，不进 CI）：
+  - `pwsh tools/ui-shots.ps1 -Capture before` 截一组，改完 `-Capture after`，再用 `-Before before -After after` 逐像素比；有差异即非零退出。
+  - `pwsh tools/window-probe.ps1` 验窗口行为：拖头部、拉边缘、松手后不再跟随、双击最大化。
 
 ## 结构
 
