@@ -33,6 +33,8 @@ const HEADER_GAP: f32 = 16.0;
 const ISLAND_GAP: f32 = 6.0;
 /// 窗口边缘到岛的留白。
 const ISLAND_MARGIN: f32 = 6.0;
+/// 窗口四个角的圆角。Windows 11 的窗口是 8，这里跟着系统走。
+const WINDOW_RADIUS: f32 = 8.0;
 /// 全局工具栏高。横贯整窗，放在菜单栏下面。
 pub const TOOLBAR_HEIGHT: f32 = 44.0;
 /// 最左图标条宽。
@@ -191,7 +193,12 @@ impl Shell {
         let painter = ui.painter().clone();
         let radius = CornerRadius::same(theme::ui().radius_surface);
         // 岛与岛之间露出来的那层底：分界全交给它，不再画线。
-        painter.rect_filled(full, CornerRadius::ZERO, theme::chrome().ground);
+        // 圆角画在这张底上：窗口本身是方的，四角靠透明透出桌面。
+        painter.rect_filled(
+            full,
+            CornerRadius::same(WINDOW_RADIUS as u8),
+            theme::chrome().ground,
+        );
 
         let header = Rect::from_min_max(
             full.min + Vec2::splat(ISLAND_MARGIN),
@@ -507,6 +514,12 @@ impl Shell {
         }
         if drag.drag_stopped() {
             self.window_drag = None;
+        }
+        // 微软的标题栏规范：没有交互元素的地方右键出系统窗口菜单。
+        if drag.secondary_clicked()
+            && let Some(pointer) = screen_pointer(ui)
+        {
+            hooks.show_system_menu(pointer.x, pointer.y);
         }
         if drag.double_clicked() && hooks.toggle_maximize().is_none() {
             let maximized = self.maximized(ui, hooks);

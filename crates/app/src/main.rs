@@ -92,6 +92,11 @@ impl ThumbnailSource for DiskThumbnails {
 struct Hooks(Option<notecevia_os::Native>);
 
 impl notecevia_ui::window::WindowHooks for Hooks {
+    fn show_system_menu(&self, x: f32, y: f32) -> bool {
+        self.0
+            .is_some_and(|native| native.show_system_menu(x as i32, y as i32))
+    }
+
     fn toggle_maximize(&self) -> Option<bool> {
         self.0.and_then(|native| native.toggle_maximize())
     }
@@ -1311,7 +1316,8 @@ impl eframe::App for App {
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         let _ = visuals;
-        theme::chrome().window.to_normalized_gamma_f32()
+        // 透明：窗口四角交给自绘的圆角底，系统那边不要铺一层不透明的颜色。
+        egui::Rgba::TRANSPARENT.to_array()
     }
 }
 
@@ -1416,7 +1422,9 @@ fn main() -> eframe::Result {
         .with_min_inner_size([720.0, 420.0])
         // 外面那层系统标题栏不要：头部自己画，品牌只出现一次。
         // 拖动、拉边、最大化由 notecevia-os 补回来，接不上会自动退回系统标题栏。
-        .with_decorations(false);
+        .with_decorations(false)
+        // 圆角靠透明：窗口本身方，自绘的底是一张圆角卡片，四角透出桌面。
+        .with_transparent(true);
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }

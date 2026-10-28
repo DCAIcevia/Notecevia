@@ -41,6 +41,11 @@ impl Native {
         windows::allow_resize(self.hwnd)
     }
 
+    /// 在指针处弹出系统窗口菜单。
+    pub fn show_system_menu(&self, x: i32, y: i32) -> bool {
+        windows::show_system_menu(self.hwnd, x, y)
+    }
+
     /// 切最大化或还原，返回切完之后是不是最大化。
     pub fn toggle_maximize(&self) -> Option<bool> {
         windows::toggle_maximize(self.hwnd)
@@ -61,6 +66,11 @@ impl Native {
 
     /// 这个平台没有实现窗口行为。
     pub fn allow_resize(&self) -> bool {
+        false
+    }
+
+    /// 这个平台没有实现窗口行为。
+    pub fn show_system_menu(&self, _x: i32, _y: i32) -> bool {
         false
     }
 

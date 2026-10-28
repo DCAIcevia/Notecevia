@@ -14,6 +14,10 @@ const SWP_NOZORDER: u32 = 0x0004;
 const SWP_NOACTIVATE: u32 = 0x0010;
 const SWP_FRAMECHANGED: u32 = 0x0020;
 
+const TPM_RETURNCMD: u32 = 0x0100;
+const TPM_NONOTIFY: u32 = 0x0080;
+const WM_SYSCOMMAND: u32 = 0x0112;
+
 const SW_MAXIMIZE: i32 = 3;
 const SW_RESTORE: i32 = 9;
 
@@ -31,6 +35,17 @@ unsafe extern "system" {
         flags: u32,
     ) -> i32;
     fn IsZoomed(window: *mut c_void) -> i32;
+    fn GetSystemMenu(window: *mut c_void, revert: i32) -> *mut c_void;
+    fn TrackPopupMenu(
+        menu: *mut c_void,
+        flags: u32,
+        x: i32,
+        y: i32,
+        reserved: i32,
+        window: *mut c_void,
+        rect: *mut c_void,
+    ) -> i32;
+    fn PostMessageW(window: *mut c_void, message: u32, wparam: usize, lparam: isize) -> i32;
     fn ShowWindow(window: *mut c_void, command: i32) -> i32;
 }
 
@@ -88,4 +103,34 @@ pub fn toggle_maximize(hwnd: isize) -> Option<bool> {
         ShowWindow(window, if maximized { SW_RESTORE } else { SW_MAXIMIZE });
     }
     Some(!maximized)
+}
+/// 在指针处弹出系统窗口菜单（还原、移动、大小、最小化、最大化、关闭）。
+///
+/// 微软的标题栏规范要求：标题栏里没有交互元素的地方右键就出这个菜单。
+/// 菜单是系统的，所以由它绘制、由它处理选中项，我们只负责在正确的位置叫它出来。
+pub fn show_system_menu(hwnd: isize, x: i32, y: i32) -> bool {
+    let Some(window) = window_of(hwnd) else {
+        return false;
+    };
+    // SAFETY: 句柄来自 raw-window-handle，由 eframe 持有；菜单句柄由系统管理，
+    // 这里只是在指针位置把它显示出来，选中项的后果交给系统。
+    unsafe {
+        let menu = GetSystemMenu(window, 0);
+        if menu.is_null() {
+            return false;
+        }
+        let command = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_NONOTIFY,
+            x,
+            y,
+            0,
+            window,
+            core::ptr::null_mut(),
+        );
+        if command != 0 {
+            PostMessageW(window, WM_SYSCOMMAND, command as usize, 0);
+        }
+    }
+    true
 }
