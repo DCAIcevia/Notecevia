@@ -7,6 +7,9 @@ use core::ffi::c_void;
 
 const GWL_STYLE: i32 = -16;
 const WS_THICKFRAME: i32 = 0x0004_0000;
+const WS_SYSMENU: i32 = 0x0008_0000;
+const WS_MAXIMIZEBOX: i32 = 0x0001_0000;
+const WS_MINIMIZEBOX: i32 = 0x0002_0000;
 
 const SWP_NOSIZE: u32 = 0x0001;
 const SWP_NOMOVE: u32 = 0x0002;
@@ -87,16 +90,19 @@ pub fn allow_resize(hwnd: isize) -> bool {
         return false;
     };
     // SAFETY: 句柄来自 raw-window-handle，由 eframe 在整个运行期持有；
-    // 这两个调用只读写窗口样式，不碰任何 Rust 管理的内存。
+    // 这里只读写窗口样式，不碰任何 Rust 管理的内存。
     unsafe {
         let style = GetWindowLongW(window, GWL_STYLE);
         if style == 0 {
             return false;
         }
-        if style & WS_THICKFRAME != 0 {
+        // 贴靠布局浮窗认最大化框，系统菜单认标题栏菜单位，最小化项认最小化框；
+        // 无边框窗口把这些位交出去，系统才肯接管对应的交互。
+        let wanted = style | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+        if wanted == style {
             return true;
         }
-        SetWindowLongW(window, GWL_STYLE, style | WS_THICKFRAME);
+        SetWindowLongW(window, GWL_STYLE, wanted);
         // 样式改完要让系统重算边框，不然拉边缘仍然是拉客户端。
         SetWindowPos(
             window,
