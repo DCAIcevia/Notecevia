@@ -486,8 +486,7 @@ impl Shell {
         let minimize = maximize.translate(Vec2::new(-WINDOW_BUTTON, 0.0));
 
         // 先登记拖区，菜单随后压在它上面：拖窗口不会把菜单点掉。
-        // 底边要取头部的下沿：用按钮的 min 会得到一条零高度的线，永远命中不了。
-        let strip = Rect::from_min_max(rect.min, egui::pos2(minimize.min.x, rect.max.y));
+        let strip = drag_area(rect, minimize.min.x);
         let drag = ui.interact(
             strip,
             ui.scope_id().with("shell-drag"),
@@ -1001,6 +1000,15 @@ fn cursor_points(ui: &Ui, hooks: &dyn WindowHooks) -> Option<(f32, f32)> {
     Some((x / scale, y / scale))
 }
 
+/// 标题栏上能拖窗口的那块：左边从头部起点，右边到三颗按钮为止。
+///
+/// 抽成函数是为了测得着。这里曾经写成 from_min_max(rect.min, 按钮的 min)，
+/// 而按钮的 min.y 正好等于头部顶边，于是拖区是一条零高度的线，永远命中不了——
+/// 三次"拖不动"都栽在这儿，却一直去改下游。
+fn drag_area(header: Rect, buttons_left: f32) -> Rect {
+    Rect::from_min_max(header.min, egui::pos2(buttons_left, header.max.y))
+}
+
 /// 窗口最小尺寸。比这个再小就没法用了。
 const MIN_WINDOW_WIDTH: f32 = 720.0;
 const MIN_WINDOW_HEIGHT: f32 = 420.0;
@@ -1161,5 +1169,218 @@ fn shortcut(key: &str) -> String {
         format!("⌘ {key}")
     } else {
         format!("Ctrl {key}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// 测试用的窗口：指针在哪、按键按没按、菜单有没有被叫出来，全由测试给定。
+    /// 真实窗口不可测，但窗口在接口后面，就可以从这里替换掉。
+    #[derive(Default)]
+    struct FakeWindow {
+        cursor: Cell<(f32, f32)>,
+        down: Cell<bool>,
+        maximized: Cell<bool>,
+        menus: Cell<u32>,
+    }
+
+    impl WindowHooks for FakeWindow {
+        fn show_system_menu(&self, _x: f32, _y: f32) -> bool {
+            self.menus.set(self.menus.get() + 1);
+            true
+        }
+
+        fn primary_button_down(&self) -> Option<bool> {
+            Some(self.down.get())
+        }
+
+        fn cursor_position(&self) -> Option<(f32, f32)> {
+            Some(self.cursor.get())
+        }
+
+        fn toggle_maximize(&self) -> Option<bool> {
+            self.maximized.set(!self.maximized.get());
+            Some(self.maximized.get())
+        }
+
+        fn is_maximized(&self) -> Option<bool> {
+            Some(self.maximized.get())
+        }
+    }
+
+    const SCREEN: Vec2 = Vec2::new(800.0, 600.0);
+    /// 窗口在屏幕上的左上角。外壳拿它和指针坐标一起算位移。
+    const WINDOW_AT: egui::Pos2 = egui::Pos2::new(100.0, 100.0);
+
+    fn click(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    /// 跑一帧外壳，把这一帧发给窗口的视口命令捞回来。
+    fn frame(
+        ctx: &egui::Context,
+        shell: &mut Shell,
+        window: &FakeWindow,
+        time: f64,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::ViewportCommand> {
+        let mut input = egui::RawInput {
+            time: Some(time),
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            events,
+            ..Default::default()
+        };
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                outer_rect: Some(Rect::from_min_size(WINDOW_AT, SCREEN)),
+                inner_rect: Some(Rect::from_min_size(WINDOW_AT, SCREEN)),
+                focused: Some(true),
+                ..Default::default()
+            },
+        );
+        let mut home = HomeApp::new();
+        let mut trash = TrashView::new();
+        let mut media = MediaPanel::new();
+        let mut output = ctx.run_ui(input, |ui| {
+            let views = Views {
+                home: &mut home,
+                library: None,
+                trash: &mut trash,
+                media_panel: &mut media,
+                board: None,
+            };
+            shell.ui(ui, window, views);
+        });
+        output.textures_delta.clear();
+        output
+            .viewport_output
+            .remove(&egui::ViewportId::ROOT)
+            .map(|viewport| viewport.commands)
+            .unwrap_or_default()
+    }
+
+    fn resizes(commands: &[egui::ViewportCommand]) -> bool {
+        commands
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::InnerSize(_)))
+    }
+
+    #[test]
+    fn drag_area_has_area_and_stops_before_the_buttons() {
+        let header = Rect::from_min_size(egui::pos2(6.0, 6.0), Vec2::new(1268.0, 32.0));
+        let area = drag_area(header, 1154.0);
+        // 曾经这里高度是 0：一条线永远命中不了。三次拖不动的根都在这一行。
+        assert!(area.height() > 0.0, "拖区必须有高度，否则永远点不到");
+        assert!(area.width() > 0.0, "拖区必须有宽度");
+        assert_eq!(area.min, header.min, "拖区从头部左边开始");
+        assert!(area.max.x <= 1154.0, "拖区不能压到窗口按钮上");
+        assert!(header.contains_rect(area), "拖区必须在头部里面");
+    }
+
+    #[test]
+    fn resizing_keeps_the_edge_that_did_not_move() {
+        use egui::ResizeDirection as Direction;
+        let start = Rect::from_min_size(egui::pos2(100.0, 100.0), Vec2::new(800.0, 600.0));
+        // 没动就不该变：任何方向、零位移都必须原样返回。
+        for direction in [
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+            Direction::NorthEast,
+            Direction::SouthEast,
+            Direction::NorthWest,
+            Direction::SouthWest,
+        ] {
+            assert_eq!(resized(start, Vec2::ZERO, direction), start);
+        }
+        // 拉右边：左边不许动。
+        let east = resized(start, Vec2::new(40.0, 0.0), Direction::East);
+        assert_eq!(east.min, start.min);
+        assert_eq!(east.width(), 840.0);
+        // 拉左边：右边不许动。
+        let west = resized(start, Vec2::new(40.0, 0.0), Direction::West);
+        assert_eq!(west.max.x, start.max.x);
+        assert_eq!(west.width(), 760.0);
+        // 拉左下角：左边和下边一起动，所以右边与上边才是不动的。
+        let sw = resized(start, Vec2::new(-30.0, 20.0), Direction::SouthWest);
+        assert_eq!(sw.max.x, start.max.x, "左下角只动左、下两条边");
+        assert_eq!(sw.min.y, start.min.y, "上边不该跟着动");
+        assert_eq!(sw.max.y, 720.0, "下边往下走了 20");
+        assert_eq!(sw.width(), 830.0);
+        assert_eq!(sw.height(), 620.0);
+    }
+
+    #[test]
+    fn resizing_never_goes_below_the_minimum() {
+        use egui::ResizeDirection as Direction;
+        let start = Rect::from_min_size(egui::pos2(100.0, 100.0), Vec2::new(800.0, 600.0));
+        let tiny = resized(start, Vec2::new(-5000.0, -5000.0), Direction::SouthEast);
+        assert_eq!(tiny.width(), MIN_WINDOW_WIDTH);
+        assert_eq!(tiny.height(), MIN_WINDOW_HEIGHT);
+        assert_eq!(tiny.min, start.min, "拉右下角时左上角不能漂移");
+    }
+
+    #[test]
+    fn letting_go_stops_the_resize() {
+        // 曾经松手之后窗口还跟着鼠标走：位置命令每帧都发，把鼠标捕获搞丢了，
+        // 抬起事件到不了应用，状态就永远清不掉。这条测试盯的就是那一步。
+        let ctx = egui::Context::default();
+        let mut shell = Shell::new();
+        let window = FakeWindow::default();
+        window.down.set(true);
+        // 下边缘那条带子：窗口顶在 (100,100)，底边在 700。
+        window.cursor.set((400.0, 696.0));
+        frame(&ctx, &mut shell, &window, 0.0, Vec::new());
+        frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.10,
+            vec![
+                egui::Event::PointerMoved(egui::pos2(400.0, 596.0)),
+                click(egui::pos2(400.0, 596.0), true),
+            ],
+        );
+        window.cursor.set((400.0, 686.0));
+        let dragging = frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.20,
+            vec![egui::Event::PointerMoved(egui::pos2(400.0, 586.0))],
+        );
+        assert!(resizes(&dragging), "按住拖动时应该改尺寸");
+
+        // 松手：系统说键已经抬起，状态必须当帧清掉。
+        window.down.set(false);
+        let released = frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.30,
+            vec![click(egui::pos2(400.0, 586.0), false)],
+        );
+        assert!(!resizes(&released), "松手那一帧不该再改尺寸");
+
+        // 之后只移动鼠标，尺寸一个字节都不许动。
+        window.cursor.set((420.0, 300.0));
+        let after = frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.40,
+            vec![egui::Event::PointerMoved(egui::pos2(400.0, 400.0))],
+        );
+        assert!(!resizes(&after), "松手之后还跟着鼠标，就是那个 bug 回来了");
     }
 }
