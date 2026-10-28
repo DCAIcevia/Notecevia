@@ -11,6 +11,7 @@ pub mod icons;
 pub mod layout;
 pub mod library;
 pub mod media;
+pub mod media_panel;
 pub mod shell;
 pub mod strings;
 pub mod theme;

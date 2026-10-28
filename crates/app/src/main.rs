@@ -16,6 +16,7 @@ use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSo
 use notecevia_ui::layout::{Layout, LayoutSource};
 use notecevia_ui::library::{Library, LibraryAction, PageRow, VolumeRow};
 use notecevia_ui::media::MediaSource;
+use notecevia_ui::media_panel::{MediaAction, MediaKind, MediaPanel, MediaRow};
 use notecevia_ui::shell::{MenuCommand, Shell, ViewMode};
 use notecevia_ui::trash::{TrashAction, TrashKind, TrashRow, TrashView};
 use notecevia_ui::{BoardApp, strings, theme};
@@ -93,6 +94,8 @@ struct App {
     shell: Shell,
     /// 回收站视图：删掉的东西与它们的剩余天数。
     trash: TrashView,
+    /// 资源栏：工作区的媒体与筛选状态。
+    media: MediaPanel,
     /// 界面布局文件的位置。拿到路径才写盘。
     layout_path: Option<PathBuf>,
     /// 上一次设过的窗口标题，变了才发命令。
@@ -156,6 +159,7 @@ impl App {
             board: None,
             shell: Shell::with_layout(layout),
             trash: TrashView::new(),
+            media: MediaPanel::new(),
             layout_path: None,
             window_title: None,
             library: Library::new(EMPTY_BOOK_ID),
@@ -311,6 +315,8 @@ impl App {
                 }
                 self.want_thumbnail = true;
                 self.note_workspace_stamp();
+                // 新插进去的媒体要立刻在资源栏里看得到。
+                self.refresh_media();
             }
             Err(error) => self.status(strings::save_failed(error)),
         }
@@ -742,11 +748,90 @@ impl App {
         }
     }
 
-    /// 把拖进画布的文件复制进媒体池，再插成一块。
-    fn insert_media_file(&mut self, path: &Path) {
+    /// 重读资源库。索引里那张媒体表是现成的，这里只换成界面要的形状。
+    fn refresh_media(&mut self) {
+        let Some(workspace) = &self.workspace else {
+            self.media.set_rows(Vec::new());
+            return;
+        };
+        match workspace.list_media() {
+            Ok(items) => {
+                let rows = items
+                    .into_iter()
+                    .filter_map(|item| {
+                        let kind = MediaKind::of(item.kind)?;
+                        Some(MediaRow {
+                            hash: item.hash,
+                            kind,
+                            name: item.name,
+                            bytes: item.bytes,
+                            boards: item.boards,
+                        })
+                    })
+                    .collect();
+                self.media.set_rows(rows);
+            }
+            Err(error) => {
+                self.media.set_rows(Vec::new());
+                let message = strings::media_list_failed(error);
+                self.status(message);
+            }
+        }
+    }
+
+    /// 资源栏里按出来的动作：放进笔记，或者开系统文件选择器导进来。
+    fn handle_media_action(&mut self, action: MediaAction) {
+        match action {
+            MediaAction::Insert(row) => {
+                let kind = match row.kind {
+                    MediaKind::Image => BlockKind::Image,
+                    MediaKind::Video => BlockKind::Video,
+                    MediaKind::Audio => BlockKind::Audio,
+                };
+                let Some(board) = self.board.as_mut() else {
+                    self.status(strings::MEDIA_NEEDS_NOTE);
+                    return;
+                };
+                board.insert_media(kind, row.hash, row.name, row.bytes);
+            }
+            MediaAction::Import => self.import_media(),
+        }
+    }
+
+    /// 挑文件导进来：放进媒体池，再各插一块到当前笔记。
+    fn import_media(&mut self) {
+        if self.board.is_none() {
+            self.status(strings::MEDIA_NEEDS_NOTE);
+            return;
+        }
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter(
+                strings::MEDIA_IMAGE,
+                &["png", "jpg", "jpeg", "gif", "webp", "bmp"],
+            )
+            .add_filter(strings::MEDIA_VIDEO, &["mp4", "mov", "mkv", "webm", "avi"])
+            .add_filter(strings::MEDIA_AUDIO, &["mp3", "wav", "flac", "ogg", "m4a"])
+            .pick_files()
+        else {
+            return;
+        };
+        let mut imported = 0;
+        for path in paths {
+            if self.insert_media_file(&path) {
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            let message = strings::media_imported(imported);
+            self.status(message);
+        }
+    }
+
+    /// 把拖进画布的文件复制进媒体池，再插成一块。成功给 true。
+    fn insert_media_file(&mut self, path: &Path) -> bool {
         let Some(kind) = media_kind(path) else {
             self.status(strings::UNSUPPORTED_FILE);
-            return;
+            return false;
         };
         let name = path
             .file_name()
@@ -757,24 +842,26 @@ impl App {
             Err(error) => {
                 let message = format!("{}：{error}", strings::MEDIA_READ_FAILED);
                 self.status(message);
-                return;
+                return false;
             }
         };
         let Some(workspace) = &self.workspace else {
-            return;
+            return false;
         };
         let hash = match workspace.put_media(&name, &bytes) {
             Ok(hash) => hash,
             Err(error) => {
                 let message = strings::save_failed(error);
                 self.status(message);
-                return;
+                return false;
             }
         };
         let size = bytes.len() as u64;
-        if let Some(board) = &mut self.board {
-            board.insert_media(kind, hash, name, size);
-        }
+        let Some(board) = &mut self.board else {
+            return false;
+        };
+        board.insert_media(kind, hash, name, size);
+        true
     }
 
     fn import_container(&mut self, path: &Path) {
@@ -1044,6 +1131,7 @@ impl eframe::App for App {
             &mut self.home,
             Some(&mut self.library),
             &mut self.trash,
+            &mut self.media,
             self.board.as_mut(),
         );
         if let Some(layout) = output.layout {
@@ -1122,6 +1210,9 @@ impl eframe::App for App {
         }
         if let Some(action) = output.trash {
             self.handle_trash_action(action);
+        }
+        if let Some(action) = output.media {
+            self.handle_media_action(action);
         }
 
         if self.board.is_some() {
@@ -1316,6 +1407,7 @@ fn main() -> eframe::Result {
                     app.can_save = true;
                     app.refresh_boards();
                     app.refresh_library();
+                    app.refresh_media();
                     listed_at = started.elapsed();
                     app.note_workspace_stamp();
                     if recovered > 0 {

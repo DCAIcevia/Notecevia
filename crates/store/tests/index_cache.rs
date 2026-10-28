@@ -413,7 +413,7 @@ fn old_index_format_is_rebuilt_automatically() {
         cbor::decode(&fs::read(temp.path("index.cbor")).expect("读索引")).expect("解码索引");
     assert_eq!(
         index.get("format").and_then(cbor::Value::as_integer),
-        Some(3),
+        Some(4),
         "重建后应该写回当前索引格式号"
     );
 }

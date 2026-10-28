@@ -20,7 +20,7 @@ mod volumes;
 pub mod workspace;
 
 pub use error::Error;
-pub use index::{BoardInfo, SearchHit};
+pub use index::{BoardInfo, MediaInfo, SearchHit};
 pub use notecevia_core::Document;
 pub use shelves::ShelfInfo;
 pub use trash::{TRASH_KEEP_DAYS, TrashItem, TrashKind, days_left};

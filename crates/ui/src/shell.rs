@@ -12,6 +12,7 @@ use crate::home::{HomeAction, HomeApp};
 use crate::icons::{self, Icon};
 use crate::layout::{self, Layout};
 use crate::library::{Library, LibraryAction};
+use crate::media_panel::{MediaAction, MediaPanel};
 use crate::strings;
 use crate::theme;
 use crate::trash::{TrashAction, TrashView};
@@ -31,8 +32,6 @@ const RAIL_RADIUS: u8 = 8;
 const MARK: f32 = 22.0;
 /// 面板边界上能抓住的那条宽。抓区偏向外侧，别压住栏里的滚动条。
 const GRAB: f32 = 6.0;
-/// 资源栏里一行的行高。
-const ASSET_ROW: f32 = 30.0;
 
 /// 菜单栏按出来的命令。界面自己处理不了的，都交回 app。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +88,8 @@ pub struct ShellOutput {
     pub library: Option<LibraryAction>,
     /// 回收站里按出来的动作。
     pub trash: Option<TrashAction>,
+    /// 资源栏里按出来的动作。
+    pub media: Option<MediaAction>,
     /// 菜单栏按出来的命令。
     pub menu: Option<MenuCommand>,
     /// 面板宽度定下来了，该写回文件。只在松手之后给一次。
@@ -137,6 +138,7 @@ impl Shell {
         home: &mut HomeApp,
         mut library: Option<&mut Library>,
         trash: &mut TrashView,
+        media_panel: &mut MediaPanel,
         mut board: Option<&mut BoardApp>,
     ) -> ShellOutput {
         let mut output = ShellOutput::default();
@@ -314,13 +316,9 @@ impl Shell {
             main_left = list.max.x;
         }
 
-        // 右侧资源栏：只有页视图才有"这一篇的媒体"。
+        // 右侧资源栏：整个工作区的媒体，只有页视图才有它。
         let mut main_right = body.max.x;
         if self.view == ViewMode::Page && assets_width > 0.0 {
-            let assets = board
-                .as_ref()
-                .map(|board| board.assets())
-                .unwrap_or_default();
             let panel = Rect::from_min_size(
                 egui::pos2(body.max.x - assets_width, body.min.y),
                 Vec2::new(assets_width, body.height()),
@@ -330,7 +328,9 @@ impl Shell {
                 [panel.left_top(), panel.left_bottom()],
                 boundary_stroke(assets_grab_held),
             );
-            self.assets_panel(ui, panel, &assets);
+            if let Some(action) = media_panel.ui(ui, panel) {
+                output.media = Some(action);
+            }
             main_right = panel.min.x;
         }
 
@@ -568,65 +568,6 @@ impl Shell {
                 });
             });
         });
-    }
-
-    /// 资源栏：每行一个图标、一个名字、一个大小。没有资源时给一个拖入区。
-    fn assets_panel(&self, ui: &mut Ui, rect: Rect, assets: &[crate::board::AssetRow]) {
-        let painter = ui.painter().clone();
-        let mut y = rect.min.y + TOP_BAR_HEIGHT;
-        if assets.is_empty() {
-            let zone = Rect::from_min_size(
-                egui::pos2(rect.min.x + theme::ui().gap_m, y + theme::ui().gap_m),
-                Vec2::new(rect.width() - theme::ui().gap_m * 2.0, 96.0),
-            );
-            painter.rect_filled(zone, CornerRadius::same(8), theme::chrome().field);
-            painter.text(
-                zone.center(),
-                Align2::CENTER_CENTER,
-                strings::ASSETS_DROP,
-                FontId::proportional(theme::ui().meta),
-                theme::chrome().text_faint,
-            );
-            return;
-        }
-        for asset in assets {
-            let row = Rect::from_min_size(
-                egui::pos2(rect.min.x, y),
-                Vec2::new(rect.width(), ASSET_ROW),
-            );
-            let icon = match asset.kind {
-                BlockKind::Image => Icon::Image,
-                BlockKind::Audio => Icon::Audio,
-                _ => Icon::Play,
-            };
-            icons::draw(
-                &painter,
-                Rect::from_center_size(
-                    egui::pos2(row.min.x + theme::ui().gap_m + 7.0, row.center().y),
-                    Vec2::splat(14.0),
-                ),
-                icon,
-                theme::chrome().text_faint,
-            );
-            painter.text(
-                egui::pos2(row.min.x + 32.0, row.center().y),
-                Align2::LEFT_CENTER,
-                &asset.name,
-                FontId::proportional(theme::ui().meta + 0.5),
-                theme::chrome().text_muted,
-            );
-            // 量不出大小时留白，不画 "0 B"：不知道就说不知道。
-            if asset.bytes > 0 {
-                painter.text(
-                    egui::pos2(row.max.x - theme::ui().gap_m, row.center().y),
-                    Align2::RIGHT_CENTER,
-                    strings::size_text(asset.bytes),
-                    FontId::proportional(theme::ui().meta),
-                    theme::chrome().text_faint,
-                );
-            }
-            y += ASSET_ROW;
-        }
     }
 
     /// 没有打开的笔记时，主区只给一件事：新建。
