@@ -5,18 +5,15 @@
 //! 这里只管画和收动作：名字、剩余天数、大小都由 app 算好递进来，界面不碰文件，
 //! 也不读时钟。彻底删除不可逆，所以点两下才算数。
 
-use egui::{Align2, Button, CornerRadius, FontId, Rect, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, FontId, Rect, Ui, Vec2};
 
-use crate::icons::{self, Icon};
+use crate::icons::Icon;
+use crate::kit;
 use crate::strings;
 use crate::theme;
 
-/// 一行的高度。
-const ROW: f32 = 44.0;
 /// 头部高度：标题、规矩、清空按钮都在这条里。
 const HEAD: f32 = 56.0;
-/// 行里一个动作按钮的宽。「彻底删除」是最长的那个，按它定。
-const ACTION: f32 = 76.0;
 /// 头部清空按钮的宽。
 const EMPTY_ACTION: f32 = 88.0;
 
@@ -121,8 +118,11 @@ impl TrashView {
         let painter = ui.painter().clone();
         let chrome = theme::chrome();
         let tokens = theme::ui();
-        let left = rect.min.x + tokens.gap_l;
+        let mut action = None;
+
+        // 头部：标题与保留期。说明写在这里，空态就不必再重复一遍。
         let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEAD));
+        let left = rect.min.x + kit::INSET;
         painter.text(
             egui::pos2(left, head.center().y - 9.0),
             Align2::LEFT_CENTER,
@@ -138,29 +138,21 @@ impl TrashView {
             chrome.text_faint,
         );
 
-        let mut action = None;
+        // 右端是清空：不可逆，点两下才算数。
         if !self.rows.is_empty() {
-            painter.line_segment(
-                [head.left_bottom(), head.right_bottom()],
-                Stroke::new(1.0, chrome.line_soft),
-            );
-            let (label, colour) = if self.confirm_empty {
-                (strings::TRASH_EMPTY_CONFIRM, chrome.danger)
+            let (label, tone) = if self.confirm_empty {
+                (strings::TRASH_EMPTY_CONFIRM, kit::Tone::Danger)
             } else {
-                (strings::TRASH_EMPTY_ACTION, chrome.text_muted)
+                (strings::TRASH_EMPTY_ACTION, kit::Tone::Quiet)
             };
-            let button = Rect::from_min_size(
+            let button = Rect::from_center_size(
                 egui::pos2(
-                    rect.max.x - tokens.gap_l - EMPTY_ACTION,
-                    head.center().y - tokens.control_height / 2.0,
+                    rect.max.x - kit::INSET - EMPTY_ACTION / 2.0,
+                    head.center().y,
                 ),
-                Vec2::new(EMPTY_ACTION, tokens.control_height),
+                Vec2::new(EMPTY_ACTION, kit::TOOL_ROW),
             );
-            let response = ui.put(
-                button,
-                Button::new(RichText::new(label).size(tokens.meta).color(colour)).frame(false),
-            );
-            if response.clicked() {
+            if kit::text_button(ui, button, label, tone).clicked() {
                 if self.confirm_empty {
                     action = Some(TrashAction::Empty);
                 } else {
@@ -181,108 +173,47 @@ impl TrashView {
             return action;
         }
 
-        // 一列：点出来的动作先记着，循环里只读 self.rows。
-        let mut restore: Option<String> = None;
-        let mut purge: Option<String> = None;
-        let mut confirm: Option<String> = None;
-        let mut y = rect.min.y + HEAD;
-        for row in &self.rows {
-            let line = Rect::from_min_size(egui::pos2(rect.min.x, y), Vec2::new(rect.width(), ROW));
-            let hovered = ui
-                .interact(
-                    line,
-                    ui.scope_id().with(("trash-row", row.folder.as_str())),
-                    Sense::hover(),
-                )
-                .hovered();
-            if hovered {
-                painter.rect_filled(line, CornerRadius::ZERO, chrome.hover);
-            }
-            painter.line_segment(
-                [line.left_bottom(), line.right_bottom()],
-                Stroke::new(1.0, chrome.line_soft),
-            );
-            icons::draw(
-                &painter,
-                Rect::from_center_size(egui::pos2(left + 7.0, line.center().y), Vec2::splat(14.0)),
-                row.kind.icon(),
-                chrome.text_faint,
-            );
-
-            // 动作按钮占右边，剩下的才是名字的宽度：名字长了在它前面截断。
-            let actions_right = line.max.x - tokens.gap_l;
-            let purge_rect = Rect::from_min_size(
-                egui::pos2(
-                    actions_right - ACTION,
-                    line.center().y - tokens.control_height / 2.0,
-                ),
-                Vec2::new(ACTION, tokens.control_height),
-            );
-            let restore_rect = Rect::from_min_size(
-                egui::pos2(purge_rect.min.x - tokens.gap_s - ACTION, purge_rect.min.y),
-                Vec2::new(ACTION, tokens.control_height),
-            );
-            let meta_right = restore_rect.min.x - tokens.gap_l;
-            let title_left = left + 30.0;
-            let title_area = Rect::from_min_max(
-                egui::pos2(title_left, line.min.y),
-                egui::pos2(meta_right - tokens.gap_m, line.max.y),
-            );
-            painter.with_clip_rect(title_area).text(
-                egui::pos2(title_left, line.center().y),
-                Align2::LEFT_CENTER,
-                if row.title.is_empty() {
+        // 一列：行的样子与状态由 kit 统一管，这里只说每行是什么。
+        let shown: Vec<TrashRow> = self.rows.clone();
+        let mut restore = None;
+        let mut purge = None;
+        let mut confirm = None;
+        let mut rows = kit::Rows::new(
+            Rect::from_min_max(egui::pos2(rect.min.x, rect.min.y + HEAD), rect.max),
+            kit::ROW,
+        );
+        for row in &shown {
+            let Some(area) = rows.take() else {
+                break;
+            };
+            let armed = self.confirming.as_deref() == Some(row.folder.as_str());
+            let meta = strings::trash_meta(row.kind.label(), row.days_left, row.bytes);
+            let labels = [
+                strings::TRASH_RESTORE,
+                if armed {
+                    strings::TRASH_PURGE_CONFIRM
+                } else {
+                    strings::TRASH_PURGE
+                },
+            ];
+            let spec = kit::RowSpec {
+                icon: Some(row.kind.icon()),
+                label: if row.title.is_empty() {
                     strings::TRASH_UNTITLED
                 } else {
                     row.title.as_str()
                 },
-                FontId::proportional(tokens.body),
-                chrome.text,
-            );
-            painter.text(
-                egui::pos2(meta_right, line.center().y),
-                Align2::RIGHT_CENTER,
-                strings::trash_meta(row.kind.label(), row.days_left, row.bytes),
-                FontId::proportional(tokens.meta),
-                chrome.text_faint,
-            );
-
-            if ui
-                .put(
-                    restore_rect,
-                    Button::new(
-                        RichText::new(strings::TRASH_RESTORE)
-                            .size(tokens.meta)
-                            .color(chrome.text_muted),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                restore = Some(row.folder.clone());
-            }
-            let armed = self.confirming.as_deref() == Some(row.folder.as_str());
-            let (label, colour) = if armed {
-                (strings::TRASH_PURGE_CONFIRM, chrome.danger)
-            } else {
-                (strings::TRASH_PURGE, chrome.text_muted)
+                meta: &meta,
+                actions: &labels,
+                danger: Some(1),
+                selected: false,
             };
-            if ui
-                .put(
-                    purge_rect,
-                    Button::new(RichText::new(label).size(tokens.meta).color(colour)).frame(false),
-                )
-                .clicked()
-            {
-                if armed {
-                    purge = Some(row.folder.clone());
-                } else {
-                    confirm = Some(row.folder.clone());
-                }
-            }
-            y += ROW;
-            if y > rect.max.y {
-                break;
+            let hit = kit::row(ui, area, ("trash-row", row.folder.as_str()), &spec);
+            match hit.action {
+                Some(0) => restore = Some(row.folder.clone()),
+                Some(_) if armed => purge = Some(row.folder.clone()),
+                Some(_) => confirm = Some(row.folder.clone()),
+                None => {}
             }
         }
 

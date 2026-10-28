@@ -8,6 +8,7 @@ pub mod chrome;
 pub mod fonts;
 pub mod home;
 pub mod icons;
+pub mod kit;
 pub mod layout;
 pub mod library;
 pub mod media;
