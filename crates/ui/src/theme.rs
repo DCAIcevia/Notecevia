@@ -383,7 +383,7 @@ pub fn apply(ctx: &egui::Context) {
 /// 主题文件要用的那点 JSON：对象、数组、字符串、数字、真假、空。
 ///
 /// 只认这些写法，别的（注释、尾逗号、单引号、NaN）一律报错，不猜。
-mod json {
+pub(crate) mod json {
     #[derive(Clone, Debug, PartialEq)]
     pub enum Value {
         Null,
