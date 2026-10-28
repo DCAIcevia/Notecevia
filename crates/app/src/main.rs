@@ -6,17 +6,18 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use notecevia_core::volume::EMPTY_BOOK_ID;
 use notecevia_core::{BlockKind, Document};
-use notecevia_store::Workspace;
+use notecevia_store::{TRASH_KEEP_DAYS, TrashKind as SavedTrashKind, Workspace, days_left};
 use notecevia_ui::home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
 use notecevia_ui::layout::{Layout, LayoutSource};
 use notecevia_ui::library::{Library, LibraryAction, PageRow, VolumeRow};
 use notecevia_ui::media::MediaSource;
 use notecevia_ui::shell::{MenuCommand, Shell, ViewMode};
+use notecevia_ui::trash::{TrashAction, TrashKind, TrashRow, TrashView};
 use notecevia_ui::{BoardApp, strings, theme};
 
 /// 自动保存的间隔，秒。改动一直在就按这个节奏落盘。
@@ -90,6 +91,8 @@ struct App {
     board: Option<BoardApp>,
     /// 外壳：顶栏、两条侧栏与资源栏的宽度。
     shell: Shell,
+    /// 回收站视图：删掉的东西与它们的剩余天数。
+    trash: TrashView,
     /// 界面布局文件的位置。拿到路径才写盘。
     layout_path: Option<PathBuf>,
     /// 上一次设过的窗口标题，变了才发命令。
@@ -152,6 +155,7 @@ impl App {
             home: HomeApp::new(),
             board: None,
             shell: Shell::with_layout(layout),
+            trash: TrashView::new(),
             layout_path: None,
             window_title: None,
             library: Library::new(EMPTY_BOOK_ID),
@@ -182,14 +186,98 @@ impl App {
         }
     }
 
-    /// 状态提示跟着当前视图走，画布上写画布，首页写首页。
+    /// 状态提示跟着当前视图走：画布上写画布，其余写首页那条。
     fn status(&mut self, text: impl Into<String>) {
         let text = text.into();
-        if let Some(board) = &mut self.board {
+        if self.view == ViewMode::Page
+            && let Some(board) = &mut self.board
+        {
             board.set_status(text);
         } else {
             self.home.set_status(text);
         }
+    }
+
+    /// 重读回收站。剩余天数在这里算，界面不读时钟。
+    fn refresh_trash(&mut self) {
+        self.trash.set_keep_days(TRASH_KEEP_DAYS);
+        let Some(workspace) = &self.workspace else {
+            self.trash.set_rows(Vec::new());
+            return;
+        };
+        let now = now_seconds();
+        match workspace.list_trash() {
+            Ok(items) => {
+                let rows = items
+                    .into_iter()
+                    .map(|item| TrashRow {
+                        folder: item.folder,
+                        kind: match item.kind {
+                            SavedTrashKind::Board => TrashKind::Board,
+                            SavedTrashKind::Volume => TrashKind::Volume,
+                            SavedTrashKind::Shelf => TrashKind::Shelf,
+                        },
+                        title: item.title,
+                        days_left: days_left(item.deleted_at, now),
+                        bytes: item.bytes,
+                    })
+                    .collect();
+                self.trash.set_rows(rows);
+            }
+            Err(error) => {
+                self.trash.set_rows(Vec::new());
+                let message = strings::trash_list_failed(error);
+                self.status(message);
+            }
+        }
+    }
+
+    fn handle_trash_action(&mut self, action: TrashAction) {
+        match action {
+            TrashAction::Restore(folder) => {
+                let Some(workspace) = &self.workspace else {
+                    return;
+                };
+                match workspace.restore_trash(&folder) {
+                    Ok(()) => {
+                        self.status(strings::TRASH_RESTORED);
+                        // 还原的是笔记就回到列表，是册就回到册列表：两处都刷一遍。
+                        self.refresh_boards();
+                        self.refresh_library();
+                    }
+                    Err(error) => {
+                        let message = strings::restore_failed(error);
+                        self.status(message);
+                    }
+                }
+            }
+            TrashAction::Purge(folder) => {
+                let Some(workspace) = &self.workspace else {
+                    return;
+                };
+                match workspace.purge_trash_item(&folder) {
+                    Ok(()) => self.status(strings::TRASH_PURGED),
+                    Err(error) => {
+                        let message = strings::purge_failed(error);
+                        self.status(message);
+                    }
+                }
+            }
+            TrashAction::Empty => {
+                let Some(workspace) = &self.workspace else {
+                    return;
+                };
+                match workspace.empty_trash() {
+                    Ok(_) => self.status(strings::TRASH_EMPTIED),
+                    Err(error) => {
+                        let message = strings::empty_trash_failed(error);
+                        self.status(message);
+                    }
+                }
+            }
+        }
+        // 不管成没成，列表都按盘上真实情况重画：失败时也能看见还剩什么。
+        self.refresh_trash();
     }
 
     /// 面板宽度摆完了就写回 ui.json。
@@ -921,9 +1009,7 @@ impl eframe::App for App {
         let new_note_key =
             ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N));
         // 界不读时钟：这里把"现在"递进去，列表才好写"3 分钟前"。
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let now = now_seconds();
         self.home.set_now(now);
         // 当前东西的名字放窗口标题栏：界面里再顶一个名字，就成标签页了。
         let title = match &self.board {
@@ -931,6 +1017,7 @@ impl eframe::App for App {
                 format!("{} — Notecevia", board.document().board.title)
             }
             _ if self.view == ViewMode::Volume => format!("{} — Notecevia", self.volume_title()),
+            _ if self.view == ViewMode::Trash => format!("{} — Notecevia", strings::TRASH_TITLE),
             _ => "Notecevia".to_owned(),
         };
         if self.window_title.as_deref() != Some(title.as_str()) {
@@ -956,6 +1043,7 @@ impl eframe::App for App {
             ui,
             &mut self.home,
             Some(&mut self.library),
+            &mut self.trash,
             self.board.as_mut(),
         );
         if let Some(layout) = output.layout {
@@ -1022,12 +1110,18 @@ impl eframe::App for App {
         }
         if let Some(view) = output.view {
             self.view = view;
-            if view == ViewMode::Volume {
-                self.refresh_library();
+            match view {
+                ViewMode::Volume => self.refresh_library(),
+                // 每次进回收站都重读一遍：别处删了东西，这边要立刻对得上。
+                ViewMode::Trash => self.refresh_trash(),
+                _ => {}
             }
         }
         if let Some(action) = output.library {
             self.handle_library_action(action);
+        }
+        if let Some(action) = output.trash {
+            self.handle_trash_action(action);
         }
 
         if self.board.is_some() {
@@ -1112,6 +1206,13 @@ fn is_blank_note(board: &BoardApp) -> bool {
         && !board.is_dirty()
 }
 
+/// 现在的 Unix 秒。界面不读时钟，时间由这里递进去。
+fn now_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64)
+}
+
 fn board_item(info: notecevia_store::BoardInfo) -> BoardItem {
     BoardItem {
         id: info.id,
@@ -1131,6 +1232,7 @@ fn main() -> eframe::Result {
     let mut select = false;
     let mut home = false;
     let mut volume_view = false;
+    let mut trash_view = false;
     let mut thumbnail_check = false;
     let mut image_check = false;
     let mut export_check = false;
@@ -1147,6 +1249,7 @@ fn main() -> eframe::Result {
             Some("--select") => select = true,
             Some("--home") => home = true,
             Some("--volume") => volume_view = true,
+            Some("--trash") => trash_view = true,
             Some("--thumbnail") => thumbnail_check = true,
             Some("--export-image") => image_check = true,
             Some("--export-all") => export_check = true,
@@ -1251,8 +1354,15 @@ fn main() -> eframe::Result {
                 app.refresh_library();
                 app.shell.set_view(ViewMode::Volume);
             }
-            let force_board =
-                !home && !volume_view && (stress || edit || select || nudge || app.shot.is_some());
+            if trash_view {
+                app.view = ViewMode::Trash;
+                app.refresh_trash();
+                app.shell.set_view(ViewMode::Trash);
+            }
+            let force_board = !home
+                && !volume_view
+                && !trash_view
+                && (stress || edit || select || nudge || app.shot.is_some());
             if force_board {
                 app.open_latest_or_create();
             }

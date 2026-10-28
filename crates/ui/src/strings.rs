@@ -171,6 +171,56 @@ pub const BRAND: &str = "Notecevia";
 pub const SHELL_SEARCH: &str = "搜索";
 /// 外壳：面板边界上的提示。线一亮就能拖，双击回到默认宽。
 pub const SHELL_RESIZE: &str = "拖动调整宽度，双击复位";
+/// 回收站：标题（图标条上的提示也用它）。
+pub const TRASH_TITLE: &str = "回收站";
+pub const TRASH_EMPTY_TITLE: &str = "回收站是空的";
+pub const TRASH_EMPTY_ACTION: &str = "清空回收站";
+pub const TRASH_EMPTY_CONFIRM: &str = "确认清空";
+pub const TRASH_RESTORE: &str = "还原";
+pub const TRASH_PURGE: &str = "彻底删除";
+pub const TRASH_PURGE_CONFIRM: &str = "确认删除";
+pub const TRASH_UNTITLED: &str = "（名字读不出来）";
+pub const TRASH_KIND_BOARD: &str = "笔记";
+pub const TRASH_KIND_VOLUME: &str = "册";
+pub const TRASH_KIND_SHELF: &str = "书架";
+pub const TRASH_RESTORED: &str = "已还原";
+pub const TRASH_PURGED: &str = "已彻底删除";
+pub const TRASH_EMPTIED: &str = "回收站已清空";
+
+/// 回收站：留多久，说清后果。
+pub fn trash_hint(days: i64) -> String {
+    format!("删掉的笔记、册与书架会在这里留 {days} 天，到期自动清掉")
+}
+
+pub fn trash_empty_hint(days: i64) -> String {
+    format!("删掉的东西会先放在这里，{days} 天内都能还原")
+}
+
+/// 回收站一条的元信息：种类 · 还剩几天 · 大小。
+pub fn trash_meta(kind: &str, days: i64, bytes: u64) -> String {
+    let left = if days <= 0 {
+        "今天到期".to_owned()
+    } else {
+        format!("剩 {days} 天")
+    };
+    format!("{kind} · {left} · {}", size_text(bytes))
+}
+
+pub fn restore_failed(error: impl std::fmt::Display) -> String {
+    format!("还原失败：{error}")
+}
+
+pub fn purge_failed(error: impl std::fmt::Display) -> String {
+    format!("彻底删除失败：{error}")
+}
+
+pub fn empty_trash_failed(error: impl std::fmt::Display) -> String {
+    format!("清空失败：{error}")
+}
+
+pub fn trash_list_failed(error: impl std::fmt::Display) -> String {
+    format!("回收站读不出来：{error}")
+}
 /// 外壳：没有打开的笔记。
 pub const SHELL_NO_NOTE: &str = "还没有打开的笔记";
 /// 外壳：新建笔记。
@@ -228,6 +278,19 @@ pub const MENU_SHOW_ASSETS: &str = "展开资源栏";
 pub const MENU_ABOUT: &str = "关于 Notecevia";
 
 /// 关于：只在状态行显示一次。
+/// 文件大小只留一位小数，够看就行。
+pub fn size_text(bytes: u64) -> String {
+    const K: f64 = 1024.0;
+    let value = bytes as f64;
+    if value >= K * K {
+        format!("{:.1} MB", value / (K * K))
+    } else if value >= K {
+        format!("{:.0} KB", value / K)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 pub fn about() -> String {
     format!("Notecevia {}", crate::version())
 }

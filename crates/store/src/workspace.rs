@@ -29,15 +29,16 @@ use crate::volumes::VOLUMES_DIR;
 
 pub use crate::error::Error;
 
-const BOARDS_DIR: &str = "boards";
-const BLOCKS_DIR: &str = "blocks";
+pub(crate) const BOARDS_DIR: &str = "boards";
+pub(crate) const BLOCKS_DIR: &str = "blocks";
 const MEDIA_DIR: &str = "media";
-const THUMBNAILS_DIR: &str = "thumbnails";
+pub(crate) const THUMBNAILS_DIR: &str = "thumbnails";
 /// 回收站目录名。放在工作区里，整个工作区拷走时一起带走。
 pub(crate) const TRASH_DIR: &str = ".trash";
 
 /// 回收站条目留多久：30 天。参照 Windows 回收站，过了就真删，不再占用户的盘。
-const TRASH_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+/// 天数与秒数的换算只在回收站模块里写一次，界面显示的"还剩几天"用它同一套。
+const TRASH_RETENTION_SECONDS: i64 = crate::trash::TRASH_KEEP_DAYS * crate::trash::SECONDS_PER_DAY;
 
 /// 一个工作区目录。
 pub struct Workspace {
@@ -223,7 +224,7 @@ impl Workspace {
         let stamp = now_seconds();
         // 先摘册：摘不掉就别删页，免得册里留下指向空处的编号。
         self.detach_page(board_id, None, stamp)?;
-        let folder = format!("{stamp}-board-{board_id}");
+        let folder = self.unused_trash_folder(stamp, &format!("board-{board_id}"));
         if board.exists() {
             self.move_to_trash(&board, &folder)?;
         }
@@ -451,7 +452,7 @@ impl Workspace {
             .iter()
             .map(|entry| entry.id)
             .collect();
-        let folder = format!("{stamp}-blocks");
+        let folder = self.unused_trash_folder(stamp, "blocks");
         for block_id in self.block_ids_of(board_id)? {
             if kept.contains(&block_id) {
                 continue;
@@ -459,6 +460,27 @@ impl Workspace {
             self.move_to_trash(&self.block_path(board_id, block_id), &folder)?;
         }
         Ok(())
+    }
+
+    /// 挑一个还没被占用的回收站条目名。
+    ///
+    /// 删掉最大编号的笔记之后，新建的笔记会拿到同一个编号；如果两次删除落在同一秒，
+    /// 条目名就会撞车，两条被塞进同一格，列表里只剩一条。撞车时在时间戳后面加序号：
+    /// 时间戳仍在最前面，"按名字算删除时间"的规则不受影响。
+    fn unused_trash_folder(&self, stamp: i64, rest: &str) -> String {
+        let trash = self.root.join(TRASH_DIR);
+        let mut attempt = 1;
+        loop {
+            let name = if attempt == 1 {
+                format!("{stamp}-{rest}")
+            } else {
+                format!("{stamp}-{attempt}-{rest}")
+            };
+            if !trash.join(&name).exists() {
+                return name;
+            }
+            attempt += 1;
+        }
     }
 
     /// 把文件移进 .trash/<folder>/。同名的已经在了就加序号，不覆盖回收站里的东西。
@@ -545,7 +567,7 @@ fn remove_temp_files(dir: &Path) -> usize {
 }
 
 /// 一个回收站条目是哪天删的：先读名字最前面的秒级时间戳，读不出来按修改时间。
-fn trash_entry_deleted_at(entry: &fs::DirEntry) -> Option<i64> {
+pub(crate) fn trash_entry_deleted_at(entry: &fs::DirEntry) -> Option<i64> {
     if let Some(stamp) = entry.file_name().to_str().and_then(stamp_in_name) {
         return Some(stamp);
     }
@@ -568,7 +590,7 @@ fn stamp_in_name(name: &str) -> Option<i64> {
 /// 删掉一个回收站条目，删成功给 true。
 ///
 /// 用 symlink_metadata 看类型：回收站里的软链接只删链接本身，不跟着它走进别处。
-fn remove_trash_entry(path: &Path) -> bool {
+pub(crate) fn remove_trash_entry(path: &Path) -> bool {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).is_ok(),
         Ok(_) => fs::remove_file(path).is_ok(),

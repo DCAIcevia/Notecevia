@@ -14,6 +14,7 @@ pub mod media;
 pub mod shell;
 pub mod strings;
 pub mod theme;
+pub mod trash;
 
 pub use board::BoardApp;
 pub use home::{BoardItem, ExportKind, HomeAction, HomeApp, ThumbnailSource};
