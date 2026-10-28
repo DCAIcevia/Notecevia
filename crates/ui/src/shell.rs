@@ -14,6 +14,7 @@ use crate::layout::{self, Layout};
 use crate::library::{Library, LibraryAction};
 use crate::strings;
 use crate::theme;
+use crate::trash::{TrashAction, TrashView};
 
 /// 顶栏高。外壳里所有面板的头部都跟它等高，横线才对得齐。
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
@@ -52,14 +53,16 @@ pub enum MenuCommand {
     About,
 }
 
-/// 左侧栏的三层视图：一篇笔记 / 一组笔记 / 所有组。
+/// 左侧栏的三层视图：一篇笔记 / 一组笔记 / 所有组，外加底部的回收站工具。
 ///
 /// 现在只有「页」有数据；「册」与「书架」是分类管理，等模型定了再接上。
+/// 回收站不是一层视图，是工具入口，借同一个状态位说"现在主区画的是谁"。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Page,
     Volume,
     Shelf,
+    Trash,
 }
 
 /// 全局工具栏上的动作。
@@ -84,6 +87,8 @@ pub struct ShellOutput {
     pub view: Option<ViewMode>,
     /// 册视图按出来的动作。
     pub library: Option<LibraryAction>,
+    /// 回收站里按出来的动作。
+    pub trash: Option<TrashAction>,
     /// 菜单栏按出来的命令。
     pub menu: Option<MenuCommand>,
     /// 面板宽度定下来了，该写回文件。只在松手之后给一次。
@@ -131,6 +136,7 @@ impl Shell {
         ui: &mut Ui,
         home: &mut HomeApp,
         mut library: Option<&mut Library>,
+        trash: &mut TrashView,
         mut board: Option<&mut BoardApp>,
     ) -> ShellOutput {
         let mut output = ShellOutput::default();
@@ -199,6 +205,27 @@ impl Shell {
                 output.view = Some(mode);
             }
         }
+        // 图标条底部是工具入口，和上面的三层视图分开：回收站放这儿。
+        // 设置等真有设置项再放——没有东西可设的入口只会占位置。
+        let tool = Rect::from_center_size(
+            egui::pos2(
+                rail.center().x,
+                rail.max.y - theme::ui().gap_m - RAIL_BUTTON / 2.0,
+            ),
+            Vec2::splat(RAIL_BUTTON),
+        );
+        if self.rail_button(
+            ui,
+            tool,
+            Icon::Trash,
+            strings::TRASH_TITLE,
+            self.view == ViewMode::Trash,
+            true,
+        ) {
+            self.view = ViewMode::Trash;
+            output.view = Some(ViewMode::Trash);
+        }
+
         // 两条面板的边界就是把手：拖动改宽度，拖到底收起，从收起里拖回来重新打开。
         // 抓区先登记，栏里的控件就能压在它上面——贴着内边缘的滚动条不该被边界抢走。
         // 窗口窄了就按可用宽度收一收：画的宽度与抓取的位置都取收过的值，存的值不动。
@@ -320,6 +347,11 @@ impl Shell {
                             output.library = Some(action);
                         }
                     });
+                }
+            }
+            ViewMode::Trash => {
+                if let Some(action) = trash.ui(ui, main) {
+                    output.trash = Some(action);
                 }
             }
             _ => {
@@ -588,7 +620,7 @@ impl Shell {
                 painter.text(
                     egui::pos2(row.max.x - theme::ui().gap_m, row.center().y),
                     Align2::RIGHT_CENTER,
-                    size_text(asset.bytes),
+                    strings::size_text(asset.bytes),
                     FontId::proportional(theme::ui().meta),
                     theme::chrome().text_faint,
                 );
@@ -704,19 +736,6 @@ fn toggle(width: f32, default: f32) -> f32 {
 enum Side {
     Left,
     Right,
-}
-
-/// 文件大小只留一位小数，够看就行。
-fn size_text(bytes: u64) -> String {
-    const K: f64 = 1024.0;
-    let value = bytes as f64;
-    if value >= K * K {
-        format!("{:.1} MB", value / (K * K))
-    } else if value >= K {
-        format!("{:.0} KB", value / K)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 /// 菜单里一项：动作 + 快捷键提示。禁用的项照样显示，只是点不动。
