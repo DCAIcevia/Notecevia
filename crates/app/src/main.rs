@@ -1160,6 +1160,10 @@ impl eframe::App for App {
         // 系统标题栏没了，同一个名字要写在两处：系统那份给任务栏与 Alt+Tab，
         // 界面这份给窗口里看得见的那行。少了后者，用户认不出自己开着哪一页。
         self.shell.set_title(title.clone());
+        // 截图验收时把焦点钉死：进程有没有前台是随机的，不钉住同一份代码会画出两张图。
+        if self.shot.is_some() {
+            self.shell.pin_focus(true);
+        }
         if self.window_title.as_deref() != Some(title.as_str()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = Some(title);

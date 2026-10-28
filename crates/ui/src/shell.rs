@@ -141,6 +141,8 @@ pub struct Shell {
     window_resize: Option<(Rect, (f32, f32), egui::ResizeDirection)>,
     /// 标题。系统标题栏没了，文档名只剩这一处能看见。
     title: String,
+    /// 钉住的焦点状态。截图时用：进程有没有前台是随机的，不钉住同一份代码会画出两张图。
+    focus_pinned: Option<bool>,
     view: ViewMode,
 }
 
@@ -164,6 +166,7 @@ impl Shell {
             drag: None,
             window_resize: None,
             title: String::new(),
+            focus_pinned: None,
             view: ViewMode::Page,
         }
     }
@@ -176,6 +179,19 @@ impl Shell {
     /// 标题栏上写什么。系统标题栏没了，这是文档名唯一看得见的地方。
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.title = title.into();
+    }
+
+    /// 把焦点状态钉住。截图验收用：真实焦点取决于进程有没有前台，随机。
+    pub fn pin_focus(&mut self, focused: bool) {
+        self.focus_pinned = Some(focused);
+    }
+
+    /// 现在算不算有焦点。钉住了就听钉的值。
+    fn window_focused(&self, ui: &Ui) -> bool {
+        self.focus_pinned.unwrap_or_else(|| {
+            ui.ctx()
+                .input(|input| input.viewport().focused.unwrap_or(true))
+        })
     }
 
     pub fn ui(&mut self, ui: &mut Ui, hooks: &dyn WindowHooks, views: Views<'_>) -> ShellOutput {
@@ -535,10 +551,7 @@ impl Shell {
             egui::pos2(minimize.min.x, rect.max.y),
         );
         if !self.title.is_empty() {
-            let colour = if ui
-                .ctx()
-                .input(|input| input.viewport().focused.unwrap_or(true))
-            {
+            let colour = if self.window_focused(ui) {
                 chrome.text_muted
             } else {
                 chrome.text_faint
@@ -584,9 +597,7 @@ impl Shell {
         );
         let chrome = theme::chrome();
         let closing = kind == WindowButton::Close;
-        let focused = ui
-            .ctx()
-            .input(|input| input.viewport().focused.unwrap_or(true));
+        let focused = self.window_focused(ui);
         // 悬停、按下、静置三档底色都取主题；系统标题栏按钮是整格出血的，
         // 这里只内缩 2——它坐在岛里，出血到边缘会把卡的圆角盖成方的。
         let fill = if response.is_pointer_button_down_on() {
