@@ -16,7 +16,7 @@ use crate::media_panel::{MediaAction, MediaPanel};
 use crate::strings;
 use crate::theme;
 use crate::trash::{TrashAction, TrashView};
-use crate::window::WindowHooks;
+use crate::window::{CaptionPointer, CaptionZones, WindowHooks};
 
 /// 顶栏高。外壳里所有面板的头部都跟它等高，横线才对得齐。
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
@@ -565,6 +565,20 @@ impl Shell {
             );
         }
 
+        // 图标与最大化按钮交给系统：贴靠浮窗和系统菜单只认系统自己认得的区域。
+        // 报的是物理像素——系统那边没有"逻辑点"这回事。
+        let scale = ui.ctx().pixels_per_point();
+        let physical = |r: Rect| {
+            Rect::from_min_max(
+                egui::pos2(r.min.x * scale, r.min.y * scale),
+                egui::pos2(r.max.x * scale, r.max.y * scale),
+            )
+        };
+        hooks.caption_zones(CaptionZones {
+            icon: Some(physical(mark)),
+            maximize: Some(physical(maximize)),
+        });
+
         let maximized = self.maximized(ui, hooks);
         self.window_button(ui, minimize, WindowButton::Minimize, hooks);
         self.window_button(
@@ -589,24 +603,40 @@ impl Shell {
     }
 
     /// 窗口按钮：图形自己画，不依赖字体里有没有那几个符号。
+    ///
+    /// 最大化按钮在系统接管标题栏时不归界面管：贴靠浮窗只在系统认得的按钮区域
+    /// 里出现，而那块地方界面已经收不到指针事件。所以这里不登记控件、不抢点击，
+    /// 悬停与按下问系统要——画出来的样子仍和其他两个按钮一模一样。
     fn window_button(&self, ui: &mut Ui, rect: Rect, kind: WindowButton, hooks: &dyn WindowHooks) {
-        let response = ui.interact(
-            rect,
-            ui.scope_id().with(("window-button", kind as u8)),
-            Sense::click(),
-        );
         let chrome = theme::chrome();
         let closing = kind == WindowButton::Close;
         let focused = self.window_focused(ui);
+        let system = matches!(kind, WindowButton::Maximize | WindowButton::Restore)
+            && hooks.handles_caption();
+        let response = (!system).then(|| {
+            ui.interact(
+                rect,
+                ui.scope_id().with(("window-button", kind as u8)),
+                Sense::click(),
+            )
+        });
+        let pointer = match (&response, system) {
+            (_, true) => hooks.caption_pointer().unwrap_or_default(),
+            (Some(response), false) => CaptionPointer {
+                hovered: response.hovered(),
+                pressed: response.is_pointer_button_down_on(),
+            },
+            (None, false) => CaptionPointer::default(),
+        };
         // 悬停、按下、静置三档底色都取主题；系统标题栏按钮是整格出血的，
         // 这里只内缩 2——它坐在岛里，出血到边缘会把卡的圆角盖成方的。
-        let fill = if response.is_pointer_button_down_on() {
+        let fill = if pointer.pressed {
             Some(if closing {
                 chrome.danger
             } else {
                 chrome.pressed
             })
-        } else if response.hovered() {
+        } else if pointer.hovered {
             Some(if closing { chrome.danger } else { chrome.hover })
         } else {
             None
@@ -619,16 +649,19 @@ impl Shell {
             );
         }
         // 窗口失去焦点时按钮也要退一档，否则背景窗口的按钮看着仍然"可按"。
-        let colour = if response.hovered() && closing {
+        let colour = if pointer.hovered && closing {
             chrome.window
         } else if !focused {
             chrome.text_faint
-        } else if response.hovered() {
+        } else if pointer.hovered {
             chrome.text
         } else {
             chrome.text_muted
         };
         paint_window_glyph(ui.painter(), rect, kind, colour);
+        let Some(response) = response else {
+            return;
+        };
         if !response.clicked() {
             return;
         }
@@ -731,15 +764,21 @@ impl Shell {
             if response.hovered() || response.dragged() {
                 ui.ctx().set_cursor_icon(cursor);
             }
+            if !response.drag_started() {
+                continue;
+            }
+            // 拿不到系统指针，说明这平台没有窗口翻译层（Linux、macOS）：退回系统的
+            // 缩放通道。它有自己的模态循环，画面会滞后，但比拉不动强，也不用为
+            // 每个平台写一遍取指针的代码。
+            let Some(start) = cursor_points(ui, hooks) else {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+                continue;
+            };
             // 自己算尺寸，逐帧发命令：系统的 DRAG_RESIZE 是一个模态循环，
             // 那段时间应用完全不出帧，你看到的是旧画面被系统拉着走——
             // 正是"鼠标过去了内容还在原地、然后猛地跳一下"那种残影。
-            if response.drag_started()
-                && let (Some(outer), Some(start)) = (
-                    ui.ctx().input(|input| input.viewport().outer_rect),
-                    cursor_points(ui, hooks),
-                )
-            {
+            if let Some(outer) = ui.ctx().input(|input| input.viewport().outer_rect) {
                 self.window_resize = Some((outer, start, direction));
             }
         }
@@ -1190,12 +1229,34 @@ mod tests {
 
     /// 测试用的窗口：指针在哪、按键按没按、菜单有没有被叫出来，全由测试给定。
     /// 真实窗口不可测，但窗口在接口后面，就可以从这里替换掉。
-    #[derive(Default)]
     struct FakeWindow {
         cursor: Cell<(f32, f32)>,
         down: Cell<bool>,
         maximized: Cell<bool>,
         menus: Cell<u32>,
+        /// 有没有窗口翻译层。false 就是 Linux、macOS：拿不到系统指针。
+        platform: Cell<bool>,
+        /// 系统有没有接管图标与最大化按钮。
+        caption: Cell<bool>,
+        /// 系统上报的那一块的悬停与按下。
+        pointer: Cell<CaptionPointer>,
+        /// 界面报上来的两块区域。
+        zones: Cell<Option<CaptionZones>>,
+    }
+
+    impl Default for FakeWindow {
+        fn default() -> Self {
+            Self {
+                cursor: Cell::new((0.0, 0.0)),
+                down: Cell::new(false),
+                maximized: Cell::new(false),
+                menus: Cell::new(0),
+                platform: Cell::new(true),
+                caption: Cell::new(false),
+                pointer: Cell::new(CaptionPointer::default()),
+                zones: Cell::new(None),
+            }
+        }
     }
 
     impl WindowHooks for FakeWindow {
@@ -1209,7 +1270,7 @@ mod tests {
         }
 
         fn cursor_position(&self) -> Option<(f32, f32)> {
-            Some(self.cursor.get())
+            self.platform.get().then(|| self.cursor.get())
         }
 
         fn toggle_maximize(&self) -> Option<bool> {
@@ -1219,6 +1280,18 @@ mod tests {
 
         fn is_maximized(&self) -> Option<bool> {
             Some(self.maximized.get())
+        }
+
+        fn caption_zones(&self, zones: CaptionZones) {
+            self.zones.set(Some(zones));
+        }
+
+        fn handles_caption(&self) -> bool {
+            self.caption.get()
+        }
+
+        fn caption_pointer(&self) -> Option<CaptionPointer> {
+            self.caption.get().then(|| self.pointer.get())
         }
     }
 
@@ -1329,6 +1402,123 @@ mod tests {
         assert_eq!(sw.max.y, 720.0, "下边往下走了 20");
         assert_eq!(sw.width(), 830.0);
         assert_eq!(sw.height(), 620.0);
+    }
+
+    #[test]
+    fn caption_zones_cover_the_icon_and_the_maximize_button() {
+        // 交给系统的是两块具体矩形，不是"某处"。系统按像素命中，差一格就等于没交。
+        let ctx = egui::Context::default();
+        let mut shell = Shell::new();
+        let window = FakeWindow::default();
+        frame(&ctx, &mut shell, &window, 0.0, Vec::new());
+        let zones = window.zones.get().expect("每帧都得把交给系统的两块报上去");
+        let icon = zones.icon.expect("图标交给系统，才有单击菜单与双击关窗");
+        let maximize = zones.maximize.expect("最大化交给系统，才有贴靠浮窗");
+        assert_eq!(icon.size(), Vec2::splat(MARK), "图标那一格是 16 见方");
+        assert_eq!(icon.min.x, ISLAND_MARGIN + MARK_INSET, "图标离左边界 16");
+        assert_eq!(maximize.width(), WINDOW_BUTTON, "最大化按钮 46 宽");
+        assert_eq!(
+            maximize.max.x,
+            SCREEN.x - ISLAND_MARGIN - WINDOW_BUTTON,
+            "最大化按钮在关闭按钮左边"
+        );
+        assert!(!icon.intersects(maximize), "两块重叠，图标会抢走贴靠浮窗");
+    }
+
+    #[test]
+    fn caption_zones_are_reported_in_physical_pixels() {
+        // 系统命中的是物理像素。高分屏上把逻辑点当物理像素报上去，
+        // 命中区会缩到一半、落到别的地方。
+        let ctx = egui::Context::default();
+        let mut shell = Shell::new();
+        let window = FakeWindow::default();
+        frame(&ctx, &mut shell, &window, 0.0, Vec::new());
+        let logical = window.zones.get().and_then(|zones| zones.icon).unwrap();
+        ctx.set_pixels_per_point(2.0);
+        frame(&ctx, &mut shell, &window, 0.10, Vec::new());
+        let physical = window.zones.get().and_then(|zones| zones.icon).unwrap();
+        assert_eq!(physical.min.x, logical.min.x * 2.0);
+        assert_eq!(physical.width(), logical.width() * 2.0);
+    }
+
+    #[test]
+    fn maximize_button_is_left_to_the_system() {
+        // 系统接管之后点击由系统处理。界面要是也点一次，一下等于切两下：
+        // 最大化了立刻又还原，看着像"点不动"。
+        let ctx = egui::Context::default();
+        let mut shell = Shell::new();
+        let window = FakeWindow::default();
+        window.caption.set(true);
+        frame(&ctx, &mut shell, &window, 0.0, Vec::new());
+        let at = window
+            .zones
+            .get()
+            .and_then(|zones| zones.maximize)
+            .expect("最大化按钮得报上去")
+            .center();
+        frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.10,
+            vec![egui::Event::PointerMoved(at), click(at, true)],
+        );
+        let commands = frame(&ctx, &mut shell, &window, 0.20, vec![click(at, false)]);
+        assert!(!window.maximized.get(), "系统接管时界面不许再切一次");
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Maximized(_))),
+            "系统接管时界面不许再发最大化命令"
+        );
+
+        // 没有系统接管（Linux、macOS）：界面自己切，这条不能丢。
+        window.caption.set(false);
+        // 先空跑一帧让按钮登记成控件，再点：egui 的点击按上一帧的控件表命中。
+        frame(&ctx, &mut shell, &window, 0.30, Vec::new());
+        frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.40,
+            vec![egui::Event::PointerMoved(at), click(at, true)],
+        );
+        frame(&ctx, &mut shell, &window, 0.50, vec![click(at, false)]);
+        assert!(window.maximized.get(), "没有系统接管时界面得自己切最大化");
+    }
+
+    #[test]
+    fn resizing_falls_back_to_the_system_when_no_platform_layer() {
+        // Linux、macOS 没有窗口翻译层，拿不到系统指针。这条回退不成立，
+        // 那些平台上窗口根本拉不动——所以它必须有测试守着。
+        let ctx = egui::Context::default();
+        let mut shell = Shell::new();
+        let window = FakeWindow::default();
+        window.platform.set(false);
+        let edge = egui::pos2(400.0, SCREEN.y - 4.0);
+        frame(&ctx, &mut shell, &window, 0.0, Vec::new());
+        window.down.set(true);
+        frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.10,
+            vec![egui::Event::PointerMoved(edge), click(edge, true)],
+        );
+        let commands = frame(
+            &ctx,
+            &mut shell,
+            &window,
+            0.20,
+            vec![egui::Event::PointerMoved(edge - Vec2::new(0.0, 10.0))],
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::BeginResize(_))),
+            "没有平台层时要退回系统的缩放通道"
+        );
+        assert!(!resizes(&commands), "没有系统指针时界面算不出新尺寸");
     }
 
     #[test]
