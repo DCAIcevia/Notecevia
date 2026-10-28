@@ -57,6 +57,7 @@ NoteceviaData/
   media/<sha256>                    图片、视频、音频原始字节
   thumbnails/<编号>.png             列表缩略图，可删
   index.cbor                        列表与搜索索引，可删，会重建
+  ui.json                           两条侧栏的宽度，可删，删了回默认
   exports/                          导出结果
   .trash/                           删掉的画板与孤儿块
 ```
