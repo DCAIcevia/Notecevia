@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "include": ["crates/ui/**/*.ts", "crates/ui/**/*.d.ts", "crates/ui/**/*.tsx", "crates/ui/**/*.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
