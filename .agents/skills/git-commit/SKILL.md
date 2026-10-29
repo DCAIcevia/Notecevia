@@ -1,62 +1,100 @@
 ---
 name: git-commit
-description: 在 Notecevia 仓库里提交改动、拆分提交、写提交信息或发 PR 时加载。它说明本仓库的 Conventional Commits 格式与类型、提交怎么拆、门禁怎么跑，以及 main 受保护后必须走"分支 → PR → 必检项通过 → merge commit"的流程。只要任务最后要落成一个提交，就先读它。
+description: Use when committing or splitting changes in Notecevia, naming a branch, writing a commit message, or opening a pull request — covers Conventional Commits with a Chinese subject, one-purpose commits, and the protected-main merge path. Not for tagging or publishing; use the release skill.
 ---
 
-# Git 提交
+# Commit and pull request
 
-仓库由他人维护（HanYang06），`main` 上有 ruleset 保护：禁止直接推送、禁止强推、必须走 PR、合并方式只允许 merge commit，合并前必检项必须通过。这不是本项目的偏好，是仓库的硬约束——直接推会被 GitHub 拒绝，所以流程只能照它来。单人维护，不要求外部批准。
+This skill owns the shape of one commit, the branch name, the message, and the pull request body. It does not own the repository process: the protected branch, the gate commands, and the merge path live in [CONTRIBUTING.md](../../../CONTRIBUTING.md) and [AGENTS.md](../../../AGENTS.md), and are linked here, not copied.
 
-## 提交前先看仓库
+Read the repository's own practice before writing the first commit. `git log --oneline -10` shows the types and scopes in use, and history wins wherever it disagrees with this skill.
 
-`commitlint` 配置、`CONTRIBUTING.md`、`git log --oneline -10`：仓库自身的约定优先于本 skill。然后用 `git status --porcelain`、`git diff --staged`、`git diff` 看清改了什么；没有改动就直说，不要造空提交。
+## Sources of truth
 
-门禁三条全绿再提交：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
+- [CONTRIBUTING.md](../../../CONTRIBUTING.md) — protected `main`, branch shape, commit format, merge path, review.
+- [AGENTS.md](../../../AGENTS.md) — the three gate commands and the skill load table.
+- [.github/pull_request_template.md](../../../.github/pull_request_template.md) — the sections every pull request carries.
+- [release skill](../release/SKILL.md) and [code-review skill](../code-review/SKILL.md) — the work this skill hands off.
 
-## 一个提交只做一件事
+## The repository decides first
 
-混在一起的提交无法单独回滚、无法 review、出问题时也无法定位。暂存区混了多个目的时，先 `git reset -q -- <其余文件>` 把无关文件退出来，再 `git add -- <本目的文件>`。
+`main` is ruleset-protected: no direct push, no force push, no merge method other than a merge commit, and merging requires the required checks to pass. Those are GitHub's constraints, not preferences — a direct push is rejected, so there is one path and no shortcut around it.
 
-- glob 要加引号（`git add -- '*.test.*'`），否则 shell 先展开，子目录里的文件会漏掉。
-- 不用 `git add -p`、`git add -i`，它们等待人工输入，在自动化里会卡住。
-- 冲突解决后用 `git add --resolved`，它只暂存真正解决了的文件。
-- 提交前 `git diff --staged --name-only` 复核，确认没有 `.env`、密钥、证书混进去。
+There is no commitlint config and no `commit-msg` hook in this repository. Nothing validates the message mechanically; a human does, so the format below is the only check that will happen.
 
-## 提交信息
+## Before committing
 
-格式 `<type>(<scope>): <主题>`，主题是祈使句、不加句号、≤50 字符。
+- `git status --porcelain` for what changed, `git diff --staged` for what is about to be committed. When both are empty there is nothing to commit: say so and stop. Do not create an empty commit to signal that a task finished.
+- Check `git diff --staged --name-only` for `.env`, keys, certificates, and credential files. `.gitignore` lists none of them, so nothing stops an accidental `git add`; inspection is the only guard. Report such a file instead of committing it.
+- `.gitattributes` routes `*.png` and `*.vectorcraft` through Git LFS; the history stores the pointer, not the bytes. Work around the filter only with the user's agreement, and say so in the report.
+
+## One commit, one purpose
+
+A commit holding two purposes cannot be reverted, reviewed, or bisected on its own. When the index has collected unrelated work:
+
+- Unstage the other purpose with `git reset -q -- <paths>`, then stage this one with `git add -- <paths>`.
+- Quote globs (`git add -- '*.md'`). In a POSIX shell an unquoted pattern is expanded at the current depth, and files in nested directories are silently skipped.
+- Do not use `git add -p` or `git add -i`. Both wait on stdin and hang an agent that has no one to answer.
+- Re-run `git diff --staged --name-only` once more. A path you cannot explain in one sentence means the commit is still mixed.
+
+## Message
+
+`<type>(<scope>): <subject>`, with a Chinese subject. The subject is imperative, carries no trailing period, and stays within 50 characters.
 
 ```text
-feat(store): 保存前先写临时文件并原子替换
-
-原地重写在断电时会留下半个文件。改为写 .tmp、flush 后 rename，
-启动时清理残留的临时文件。
+feat(store): 保存前先写临时文件再原子替换
 ```
 
-- 中文主题，`type` 与 `scope` 用英文，工具链能解析、人也读得懂。
-- 正文写清为什么改、影响面、怎么验证；每段一个 `-m`。长正文写进临时文件用 `git commit -F <file>`。
-- footer 用 `Token: value`（唯一会被 git 识别成 trailer 的写法），token 里用 `-` 代替空格。
+- Body: why the change exists, what it affects, how it was verified. One `-m` per paragraph; for long text write a file and use `git commit -F <file>`.
+- Footer: `Token: value` on its own line after a blank line, with hyphens instead of spaces inside the token — the only shape git reads back as a trailer.
+- Breaking change: `!` before the colon, or a `BREAKING CHANGE:` footer.
 
-## 类型与 scope
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`, plus this repository's `rules`.
 
-类型：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`，外加本项目的 `rules`——规则与 skill 的改动不属于上面任何一类。
+- `rules` covers `AGENTS.md`, `.agents/`, and anything else that changes what an agent must do. It is not `docs` (text written for a human reader) and not `chore` (tooling): reading the history for `rules` is how constraint changes get audited later.
 
-scope：`core`、`store`、`ui`、`app`、`skills`、`ci`；跨模块时省略。
+Scopes: `core`, `store`, `ui`, `app`, `skills`, `ci`. Omit the scope when the change crosses modules.
 
-破坏性变更在冒号前加 `!`，或写 `BREAKING CHANGE:` footer。
+## Branch
 
-## 分支与合并
+[CONTRIBUTING.md](../../../CONTRIBUTING.md) owns the `<type>/<scope>-<subject>` shape. This skill fixes the rest: kebab-case, at most 48 characters, one purpose per branch.
 
-改动一律走短分支：`<type>/<scope>-<主题>`，kebab-case、≤48 字符，例如 `feat/editor-autosave`。分支名要让人一眼看出对应什么工作，所以禁用 `dev`、`test`、`tmp`、`wip`、日期、人名、中文。
+- Never `dev`, `test`, `tmp`, `wip`, a date, a person's name, or Chinese. These names say nothing at review time and outlive the work they were meant to hold.
+- One milestone, one pull request: accumulate on the branch until the milestone's exit criteria are met, then merge. A pull request per fix buries the milestone behind its own bookkeeping.
 
-流程：推分支 → 开 PR → 必检项通过且分支与 `main` 同步 → merge commit 合并（仓库自动删分支）。
+## Pull request
 
-一个里程碑一个 PR：改动先在分支上累积，达到里程碑的退出标准再合并；不要每件事开一个 PR。仓库已开启合并后自动删分支。
+The template's headings are literal — 改动, 验证, 风险. Write the description under them in Chinese; do not rename, reorder, or translate them.
 
-推送前确认提交邮箱已关联 GitHub 账号。不 force-push，不改写别人的分支历史。
+- 验证 is the section a reviewer re-runs. Tick each gate and, for the manual check, state what was done. An unticked box, or a tick with no method, is an unfinished pull request.
+- 风险 carries the impact scope and what the change does not cover. An empty impact scope is only honest when nothing outside the touched files can observe the difference.
+- Link the template instead of paraphrasing it: a description restating the template drifts from it within a release or two.
 
-## 安全
+Path: branch → pull request → required checks green and the branch synced with `main` → merge commit. Merging past a red required check is not a judgment call. With a single maintainer, no external approval is required ([CONTRIBUTING.md](../../../CONTRIBUTING.md)).
 
-不改 git 配置；不用 `--no-verify`（钩子失败说明有问题，修好再提交）；不擅自 `reset --hard`、rebase、改历史；不擅自 push，不 force-push 默认分支。
+## Safety
 
-提交后用 `git log -1 --stat` 和 `git status --porcelain` 复核结果。
+- Do not change git config — `user.*`, `core.*`, aliases — to make a command pass.
+- Do not pass `--no-verify`. The only installed hooks are Git LFS's, so skipping them lets a push land without uploading the objects it references.
+- `git commit --amend` is fine before the branch is pushed. After a push, fix forward with a new commit instead of rewriting history.
+- Do not run `reset --hard`, `rebase`, or any history rewrite on a branch you were not asked to repair, and never force-push `main`.
+- Stop and ask when: the only way out is a history rewrite, a push would delete someone's branch, or a file that looks like a secret has already been staged.
+
+## Report
+
+After committing, `git log -1 --stat` shows exactly the intended paths and `git status --porcelain` shows what is left behind. Write the report in the four-section format defined in [workflow.md](../project-rules/references/workflow.md).
+
+## Boundaries
+
+- Tagging, version bumps, changelogs, publishing: [release skill](../release/SKILL.md).
+- Reviewing a diff or a pull request: [code-review skill](../code-review/SKILL.md).
+- The gate commands, the four release-prep steps, and the merge rules belong to CONTRIBUTING and AGENTS. Do not restate them here, and do not reword them in a commit without saying so.
+- Commit and pull request prose beyond the format rules: [docs.md](../project-rules/references/docs.md).
+- This skill does not decide what to build or how to slice a feature. Feature scope is a question for the user.
+
+## Verification
+
+- Run the three gates named in [AGENTS.md](../../../AGENTS.md). All three exit 0 and `cargo clippy` prints no `warning:` line.
+- `git log -1 --stat`: the listed paths match the purpose stated in the subject.
+- `git status --porcelain`: empty, or only files deliberately left uncommitted.
+- Negative case: stage an unrelated file and commit. `git log -1 --stat` then lists a path the subject does not explain — that listing is the split signal, and catching it before the push is the whole point of the check.

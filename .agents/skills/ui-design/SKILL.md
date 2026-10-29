@@ -1,81 +1,108 @@
 ---
 name: ui-design
-description: 任何界面相关改动前加载：新增视图、改布局、调状态反馈、加动效、写界面文案都算。它给出判断 UI 健康与否的原则——注意力、变化、层级、颜色、文字、可达性与状态闭环——以及评审用的红旗清单。用户说界面"太吵""太挤""看着不对劲""加个动效"时，也先读它再动手。
+description: Use when adding or changing a Notecevia interface — a new view, layout, hover or focus state, animation, empty state, error copy — or when a screen looks too noisy, too cramped, or off. Gives the judgments and red flags for a healthy interface. Theme values live in docs/design/ui.md and crates/ui/theme; this is not a numeric spec.
 ---
 
-# UI 规则
+# UI design
 
-这不是一套数值规范。色值、间距、字号、栏宽属于设计产出，等视觉定稿后落在主题模块与视觉规范里；本 skill 只回答一个问题：**这个界面健康吗**。
+It is guidance, not a checklist. This skill answers one question — is this interface healthy — and healthy means attention lands on content, every change explains a relationship, and expression uses the smallest means. A red flag is a reason to look, not a verdict; the verdict names what the flag shows and what changed.
 
-健康 = 注意力花在有用的地方，变化都在解释关系，表达用最小手段。
+It is not a numeric spec. Colors, spacing, type sizes, column width, control heights, radii, shadows, durations, and z-order are design output owned by [docs/design/ui.md](../../../docs/design/ui.md) and defined as variables in [crates/ui/theme/default.css](../../../crates/ui/theme/default.css). Read them there; do not invent a value here.
 
-## 一、注意力
+## Sources of truth
 
-- 内容优先，控件安静。控件与内容争空间时内容赢；常驻控件要小、轻、不抢眼。
-- 强调是稀缺资源，一屏只有一处最强。判定：眯眼看截图，第一眼应该落在内容上。
-- 控件与内容要能区分，但区分靠位置和层级，不靠加重视觉。
+| File | What it owns |
+| --- | --- |
+| [docs/design/ui.md](../../../docs/design/ui.md) | theme layers, component priority, static versus dynamic content, shadows and radii, the preview entry |
+| [crates/ui/theme/default.css](../../../crates/ui/theme/default.css) | the variables of the one light theme: surfaces, text, lines, semantics, type, spacing, controls, radii, shadows, motion, z-order |
+| [crates/ui/theme/base.css](../../../crates/ui/theme/base.css) | reset, readable base, always-visible focus, reduced-motion fallback |
+| [crates/ui/components/base/](../../../crates/ui/components/base/) | the primitives: BaseButton, BaseTextField, BaseSearchField, BaseCheckbox, BaseProgress, BaseSpinner, BaseEmptyState |
+| [crates/ui/preview/UiPreview.vue](../../../crates/ui/preview/UiPreview.vue) | the acceptance page that lays the theme and the primitives out |
 
-## 二、变化
+The design doc wins wherever it disagrees with this skill; correct this skill in the same change.
 
-- 反馈变的是「值」，不是「加东西」：亮度、底色深浅、位置 1px 这类已有属性的微调，而不是新增描边、换高饱和色、加发光。同一元素前后状态变化超过两处视觉属性，就是过度。
-- 状态变化不改变几何：悬停、按下、选中、焦点都不改变尺寸和圆角，否则界面会抖。
-- 动效只解释关系：东西从哪来、去哪了、状态如何过渡。吸引注意、装饰、掩盖延迟都不算关系。
-- 动效必须可关闭，关掉后信息不能丢；高频交互不加动效——一天看三百次的过渡是折磨。
-- 判定：关掉动效后功能不受影响，那它就是装饰。
+## Attention
 
-## 三、层级与空间
+- Content first, controls quiet. When a control competes with content for space, content wins; a persistent control is small, light, and does not pull the eye.
+- Emphasis is scarce: one strongest element per screen. Test: squint at the screenshot and see what lands first; it must be content.
+- Separation comes from position and level, not added weight. A control boxed inside body text is the failure this prevents.
 
-- 层级取最小手段：位置 → 间距 → 字重 → 背景差 → 边框，够用就停。
-- 对齐表示相关，缩进表示从属。能用这两件事说清的，不写标签。
-- 留白是分组工具，不是装饰：间距变化必须对应信息关系变化。
-- 嵌套容器的圆角要同心内缩；有层级阴影的表面不要再叠边框。
-- 从窗口边缘到正文，隔的容器、边框、背景层超过两层就删。
+## Change
 
-## 四、颜色
+- Feedback changes a value the element already has — brightness, surface depth, a 1px shift — not a new border, a saturated color, or a glow. Two or more properties changing between states is too many.
+- State never changes geometry: hover, press, selected, and focus keep the box and the radius. A hover that adds a border or grows the control shifts everything beside it.
+- Animation explains a relationship: where something came from, where it went, how a state changed. Drawing attention, decoration, and hiding latency are not relationships.
+- Motion is removable: with it off, no information is lost. A high-frequency interaction gets no animation; a transition seen hundreds of times a day is a tax.
+- Test: remove the animation. If the interface still works, it was decoration.
 
-- 颜色只承担语义：强调、危险、警告、成功。同一颜色不能在一处表示重要、另一处表示错误。
-- 颜色不能是唯一区分手段：状态、可交互、必填都要有第二种表达（位置、形状、文字）。
-- 一套外观就是一套主题。深色、高对比度各自是独立的一整套，不是同一套主题换几个值：悬停该变深还是变浅、层级靠背景差还是靠边框、每个语义色的对比，全都要重新定。所以"做浅色的时候顺手把深色带出来"不存在，那等于重做一套。
-- 只维护一套时不与系统外观联动。跟了系统却只压一半，结果是同一屏里一半变深、一半还是浅的。
+## Hierarchy and space
 
-## 五、文字
+- Hierarchy takes the smallest means that works: position, then spacing, then weight, then background, then border. Stop at the first that reads.
+- Alignment means related; indent means subordinate. When those two say it, a label is noise.
+- Whitespace groups; it is not decoration. A spacing change must track a change in information structure.
+- Nested containers inset their radius concentrically; a surface with a layered shadow does not also draw a border. The numbers are in the design doc.
+- More than two layers of container, border, or background between the window edge and the text: delete a layer.
 
-- 布局能解释的不写文字。删掉一句说明后用户仍能正确操作，就该删。
-- 文字只留下布局解释不了的：后果与不可逆、失败原因、非直觉操作、空态。
-- 文案动词开头、与结果一致；错误信息 = 发生了什么 + 怎么办，并放在离出错位置最近的地方。
-- 少用物主代词（我的、你的）和不必要的修饰；术语全库一致。
-- 空态必须给下一步；说明文字占界面文字两成以上，说明布局有问题。
-- 界面文案集中放在前端 `crates/ui/`，快捷键集中定义，视图里不散落硬编码。
+## Color
 
-## 六、可达性与状态闭环
+- Color carries semantics only. The theme defines accent and danger; warning and success arrive when a consumer exists, not before.
+- Color is never the only signal. State, interactivity, and required fields get a second expression: position, shape, glyph, or text.
+- One appearance is one theme. Dark and high contrast are each a full redesign — surface hierarchy, hover direction, semantic contrast — not the light values shifted.
+- With one theme, do not follow the system appearance. Following it halfway leaves half a screen dark and half light.
+- Hover direction and semantic contrast are theme decisions; a view does not choose them.
 
-- 全键盘可达，焦点始终可见；命中区域够大，但不靠放大视觉重量实现。
-- 正文对比度达到可读标准（WCAG AA 4.5:1）；调大字号后布局不能挤爆、截断或错位。
-- 任何操作后用户要能判断发生了什么：保存、删除、失败、加载。缺状态比缺样式严重。
-- 加载超过一秒给进度，不用纯转圈糊过去。
+## Text
 
-## 红旗清单
+- If layout can explain it, do not write it. Delete a sentence and the user still acts correctly: it should be gone.
+- Keep text for what layout cannot say: consequence and irreversibility, the reason for a failure, a non-obvious action, an empty state.
+- Start with the verb and match the result. An error is what happened plus what to do, placed at the point of failure.
+- Drop possessives and decoration, and use one term per thing across the app.
+- An empty state always offers the next step. Explanatory text over 20% of the interface text means layout is not doing its job.
+- Interface copy lives in the frontend under `crates/ui/`; user-facing strings do not go in Rust, and a shortcut is defined once rather than per view.
 
-评审时逐条对照，命中即改：
+## Accessibility and closing the loop
 
-- 一屏两个以上强调元素，或控件比内容显眼
-- 悬停或按下改变了几何
-- 动效超过 200ms 且关掉不影响使用，或高频操作用了动效
-- 容器嵌套三层以上、每个元素都有边框、边框与阴影叠加
-- 一级界面同级按钮超过五个
-- 同一颜色两种含义，或颜色是唯一区分手段
-- 同一屏出现两套配色（例如一半跟随系统、一半用主题值），或把深色当成浅色的取值变换
-- 空态没有下一步
-- 错误信息飘在角落、离出错位置很远
-- 调大字号后布局破碎
-- 说明文字占比超过两成
+- Every action is reachable by keyboard and focus is always visible. A hit target is large enough without looking heavy.
+- Body text meets the readable contrast standard; check the pair in a contrast meter. Larger type must not clip, overlap, or overflow its container.
+- After any action the user can tell what happened: saved, deleted, failed, loading. A missing state is worse than a missing style.
+- A wait over one second shows progress; a spinner alone does not.
 
-## 设计产出不在本 skill
+## Reuse before adding
 
-色板、间距与字号档位、栏宽、图标规格、动效时长，都是设计定稿的产物，落在主题模块与视觉规范里。评审时检查"界面有没有用主题值"，不在这里对数值。
+- Look in `crates/ui/components/base/` and in the theme variables before writing markup or a value. A second button is a second bug.
+- A new color, radius, shadow, or duration enters `crates/ui/theme/default.css` as a variable. A hex, pixel, or millisecond literal in a view or component is the failure this prevents.
+- A control used by a second view becomes a component; one that stays in one view stays there.
+- [crates/ui/preview/UiPreview.vue](../../../crates/ui/preview/UiPreview.vue) shows the current theme and primitives; open the preview page before judging a change.
 
-## 验收
+## Red flags
 
-界面改动附：截图（当前只有一套主题，交这一套）、空态截图、键盘操作路径说明，以及红旗清单的逐条结论。缺一项不算完成。
+Check every line; a hit is changed, not argued.
 
-深色与高对比度各自是独立的一轮，不在本轮的验收范围：做的时候要从层级手段、悬停方向、语义色对比重新定，不是把浅色的值换一遍。
+- Two or more emphasis elements on one screen, or a control louder than the content.
+- Hover or press changes geometry.
+- A transition whose removal changes nothing, or animation on a high-frequency interaction.
+- Three or more nested containers, a border on every element, or border plus shadow on the same edge.
+- More than five peer buttons in a primary view.
+- One color with two meanings, or color as the only distinguishing signal.
+- Two color systems on one screen (part system-linked, part theme), or dark derived by shifting the light values.
+- An empty state with no next step.
+- An error message in a corner, far from where the failure happened.
+- Layout breaks, clips, or overlaps at a larger font size.
+- Explanatory text over 20% of the interface text.
+
+## Boundaries
+
+- Not for pure logic, terminal output, or data-layer behavior; the on-disk format and migrations belong to [data-format](../data-format/SKILL.md). This skill judges a surface, not what the surface reports.
+- Not a source of values: a question about a specific color, spacing, size, radius, or duration is answered by the design doc and the theme variables.
+- Stop and ask before changing the visual direction: a second theme, a motion system, a density change, a different surface hierarchy. Each is a new direction, not a fix.
+- Copy style, punctuation, and document prose: [docs.md](../project-rules/references/docs.md); the report format and task protocol: [workflow.md](../project-rules/references/workflow.md).
+- Responsive and touch behavior have no skill and no target here: the app is a Tauri desktop window with no mobile build. Treat a responsive request as a new direction and ask before designing it.
+- Reviewing the change as a whole: [code-review](../code-review/SKILL.md); this skill supplies only the interface judgments.
+
+## Verification
+
+- Run the frontend check named in [AGENTS.md](../../../AGENTS.md) (`pnpm build`); it exits 0 with no type error. `pnpm dev` renders the preview page.
+- Attach a screenshot of every changed view in the shipped theme; only one theme exists, so one set covers it. Attach the empty state as well as the populated one.
+- State the keyboard path: which keys reach the changed controls, and where focus lands after each action.
+- Give one verdict per red flag in the change or the pull request description: hit or not, and for a hit, what changed.
+- Negative case: a hover that adds a 1px border, or raises a control by one pixel, reads fine in a screenshot and still moves the layout. Compare the element's box in devtools before and after hover — `height`, `padding`, `border-width`, and `border-radius` stay identical — and fail it under the second red flag.

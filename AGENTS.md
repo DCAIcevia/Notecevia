@@ -9,9 +9,13 @@
 | 场景 | 先执行 |
 | --- | --- |
 | 任何任务开始 | `skill project-rules` |
-| 提交、分支、发布 | `skill git-commit` |
+| 提交、拆分提交、发 PR | `skill git-commit` |
+| 评审 PR 或改动 | `skill code-review` |
+| 写或改测试 | `skill testing` |
+| 改磁盘格式、迁移、导出容器 | `skill data-format` |
 | 改界面 | `skill ui-design` |
-| 新建或修改 skill | `skill skill-creator` |
+| 发版、打标签 | `skill release` |
+| 新建或修改 skill | `skill skill-creator` 与 `project-rules/references/skills.md` |
 
 ## 红线
 
