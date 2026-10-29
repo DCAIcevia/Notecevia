@@ -505,6 +505,14 @@ impl From<&VolumeInfo> for VolumeSummary {
     }
 }
 
+/// 新建一页的结果：页本身与它落进的册。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageCreatedDto {
+    pub board: BoardSummary,
+    pub volume: VolumeSummary,
+}
+
 /// 一本册：标题与有序的页编号。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

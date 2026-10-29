@@ -6,10 +6,10 @@
 //! 命令本身只是 `state.with(...)` 的壳，逻辑放在下面的普通函数里，测试直接拿临时
 //! 工作区调用它们。
 
-use notecevia_core::{Shelf, Volume};
+use notecevia_core::{Document, Shelf, Volume};
 use notecevia_store::Workspace;
 
-use super::dto::{ShelfDto, ShelfSummary, VolumeDto, VolumeSummary};
+use super::dto::{BoardSummary, PageCreatedDto, ShelfDto, ShelfSummary, VolumeDto, VolumeSummary};
 use super::error::IpcError;
 use super::now_seconds;
 use super::state::AppState;
@@ -115,6 +115,16 @@ pub fn volume_of_page(
     state.with(|workspace| page_volume(workspace, page))
 }
 
+/// 新建一页：给了册就排在末尾，没给就顺手建出一本同名册。
+#[tauri::command]
+pub fn create_page(
+    state: tauri::State<'_, AppState>,
+    title: String,
+    volume_id: Option<u64>,
+) -> Result<PageCreatedDto, IpcError> {
+    state.with(|workspace| new_page(workspace, title, volume_id))
+}
+
 /// 书架的列表。
 #[tauri::command]
 pub fn list_shelves(state: tauri::State<'_, AppState>) -> Result<Vec<ShelfSummary>, IpcError> {
@@ -150,6 +160,107 @@ pub fn create_shelf(
 #[tauri::command]
 pub fn delete_shelf(state: tauri::State<'_, AppState>, shelf_id: u64) -> Result<(), IpcError> {
     state.with(|workspace| remove_shelf(workspace, shelf_id))
+}
+
+/// 把一本册放到书架上：原来在别的架上会挪过来。
+#[tauri::command]
+pub fn shelve_volume(
+    state: tauri::State<'_, AppState>,
+    shelf_id: u64,
+    volume_id: u64,
+) -> Result<(), IpcError> {
+    state.with(|workspace| place_on_shelf(workspace, shelf_id, volume_id))
+}
+
+/// 把一本册从书架上拿掉；拿空之后书架进回收站。
+#[tauri::command]
+pub fn unshelve_volume(
+    state: tauri::State<'_, AppState>,
+    shelf_id: u64,
+    volume_id: u64,
+) -> Result<(), IpcError> {
+    state.with(|workspace| take_off_shelf(workspace, shelf_id, volume_id))
+}
+
+/// 用两本以上的册合成一层书架。
+#[tauri::command]
+pub fn create_shelf_with(
+    state: tauri::State<'_, AppState>,
+    title: String,
+    volumes: Vec<u64>,
+) -> Result<ShelfSummary, IpcError> {
+    state.with(|workspace| combine_shelf(workspace, title, volumes))
+}
+
+/// 新建一页：指定册就排在末尾，没有就顺手建出一本同名册。
+fn new_page(
+    workspace: &Workspace,
+    title: String,
+    volume_id: Option<u64>,
+) -> Result<PageCreatedDto, IpcError> {
+    let board_id = workspace.next_board()?;
+    let updated_at = now_seconds();
+    let document = Document::new(title.clone());
+    workspace.save_at(board_id, &document, updated_at)?;
+    let volume = match volume_id {
+        Some(id) => {
+            workspace.assign_page(id, board_id, usize::MAX)?;
+            let held = workspace.load_volume(id)?;
+            VolumeSummary {
+                id,
+                title: held.title,
+                page_count: held.pages.len(),
+                updated_at,
+            }
+        }
+        None => {
+            let id = workspace.next_volume()?;
+            let volume = Volume {
+                title,
+                pages: vec![board_id],
+            };
+            workspace.save_volume_at(id, &volume, updated_at)?;
+            VolumeSummary {
+                id,
+                title: volume.title,
+                page_count: volume.pages.len(),
+                updated_at,
+            }
+        }
+    };
+    Ok(PageCreatedDto {
+        board: BoardSummary {
+            id: board_id,
+            title: document.board.title,
+            tags: document.board.tags,
+            updated_at,
+            entry_count: 0,
+        },
+        volume,
+    })
+}
+
+/// 把册放到书架上：原来在别的架上会挪过来。
+fn place_on_shelf(workspace: &Workspace, shelf_id: u64, volume_id: u64) -> Result<(), IpcError> {
+    workspace.shelve_volume(shelf_id, volume_id)?;
+    Ok(())
+}
+
+/// 把册从书架上拿掉；拿空之后书架进回收站。
+fn take_off_shelf(workspace: &Workspace, shelf_id: u64, volume_id: u64) -> Result<(), IpcError> {
+    workspace.unshelve_volume(shelf_id, volume_id)?;
+    Ok(())
+}
+
+/// 用两本以上的册合成一层书架，返回列表里要显示的那一行。
+fn combine_shelf(
+    workspace: &Workspace,
+    title: String,
+    volumes: Vec<u64>,
+) -> Result<ShelfSummary, IpcError> {
+    Ok(ShelfSummary::from(
+        &workspace.create_shelf_with(title, volumes)?,
+    ))
 }
 
 /// 全部册，Empty book 固定排在最后。
@@ -478,5 +589,33 @@ mod tests {
         let temp = TempWorkspace::new("empty-book");
         let error = remove_volume(&temp.workspace, EMPTY_BOOK_ID).expect_err("Empty book 不能删");
         assert_eq!(error.kind, "cannotDeleteEmptyBook");
+    }
+
+    #[test]
+    fn page_created_without_context_brings_its_volume() {
+        let temp = TempWorkspace::new("page-new-volume");
+        let created = new_page(&temp.workspace, "新页".to_owned(), None).expect("建页");
+        assert_eq!(created.board.title, "新页");
+        assert_eq!(created.volume.title, "新页");
+        assert_eq!(created.volume.page_count, 1);
+        assert_eq!(
+            volume_pages(&temp.workspace, created.volume.id).expect("册内页"),
+            vec![created.board.id]
+        );
+    }
+
+    #[test]
+    fn page_created_inside_a_volume_lands_at_the_end() {
+        let temp = TempWorkspace::new("page-in-volume");
+        let volume = new_volume(&temp.workspace, "册".to_owned()).expect("建册");
+        add_page(&temp.workspace, 1, "旧页");
+        assign_volume_page(&temp.workspace, volume.id, 1, 0).expect("入册");
+
+        let created = new_page(&temp.workspace, "新页".to_owned(), Some(volume.id)).expect("建页");
+        assert_eq!(created.volume.id, volume.id);
+        assert_eq!(
+            volume_pages(&temp.workspace, volume.id).expect("册内页"),
+            vec![1, created.board.id]
+        );
     }
 }

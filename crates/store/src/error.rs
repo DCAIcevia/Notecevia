@@ -24,6 +24,8 @@ pub enum Error {
     NewerFormat { found: i64, supported: i64 },
     #[error("Empty book 是默认册，不能删除")]
     CannotDeleteEmptyBook,
+    #[error("一层书架至少要有两本册才能合成")]
+    ShelfTooSmall,
     #[error("回收站里的这个名字不认：{0}")]
     BadTrashFolder(String),
     #[error("编号 {0} 已经有别的东西在用了，这条还原不了：先处理占用它的那条")]
