@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import dayjs from "dayjs";
 import BaseButton from "../components/base/BaseButton.vue";
@@ -29,20 +29,29 @@ const showingHits = computed(() => query.value.trim().length > 0);
 const thumbs = ref(new Map<number, string>());
 const refreshing = ref(false);
 
-/** 缩略图是缓存：读不到就画纸色空封面，不显示破图。 */
-async function loadThumbnails(): Promise<void> {
-  for (const board of workspace.boards) {
-    if (thumbs.value.has(board.id)) continue;
-    try {
-      const bytes = await api.readThumbnail(board.id);
-      if (bytes.byteLength === 0) continue;
-      const next = new Map(thumbs.value);
-      next.set(board.id, URL.createObjectURL(new Blob([bytes], { type: "image/png" })));
-      thumbs.value = next;
-    } catch {
-      // 一张缩略图读不到不影响列表。
-    }
+// 缩略图按行加载：列表先画出来，滚到哪读到哪，不把整库读一遍再上屏。
+const requested = new Set<number>();
+let observer: IntersectionObserver | null = null;
+
+async function loadThumb(boardId: number): Promise<void> {
+  if (thumbs.value.has(boardId) || requested.has(boardId)) return;
+  requested.add(boardId);
+  try {
+    const bytes = await api.readThumbnail(boardId);
+    if (bytes.byteLength === 0) return;
+    const next = new Map(thumbs.value);
+    next.set(boardId, URL.createObjectURL(new Blob([bytes], { type: "image/png" })));
+    thumbs.value = next;
+  } catch {
+    // 一张缩略图读不到不影响列表。
+    requested.delete(boardId);
   }
+}
+
+function observeRow(element: unknown, boardId: number): void {
+  if (!(element instanceof HTMLElement)) return;
+  element.dataset.boardId = String(boardId);
+  observer?.observe(element);
 }
 
 async function refreshIndex(): Promise<void> {
@@ -50,8 +59,8 @@ async function refreshIndex(): Promise<void> {
   try {
     await api.rebuildIndex();
     thumbs.value = new Map();
+    requested.clear();
     await workspace.refreshBoards();
-    await loadThumbnails();
   } catch (error) {
     actionError.value = (error as { message?: string }).message ?? "刷新失败";
   } finally {
@@ -64,13 +73,27 @@ async function boot(): Promise<void> {
   try {
     if (!workspace.status) await workspace.open();
     await workspace.refreshBoards();
-    await loadThumbnails();
   } catch (error) {
     bootError.value = (error as { message?: string }).message ?? "打开工作区失败";
   }
 }
 
-onMounted(boot);
+onMounted(() => {
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const boardId = Number((entry.target as HTMLElement).dataset.boardId);
+        observer?.unobserve(entry.target);
+        if (Number.isFinite(boardId)) void loadThumb(boardId);
+      }
+    },
+    { rootMargin: "200px" },
+  );
+  void boot();
+});
+
+onBeforeUnmount(() => observer?.disconnect());
 
 function formatTime(seconds: number): string {
   return dayjs(seconds * 1000).format("YYYY-MM-DD HH:mm");
@@ -208,7 +231,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
           @blur="commitRename(board)"
         />
         <template v-else>
-          <button class="row" type="button" @click="openBoard(board.id)">
+          <button class="row" type="button" :ref="(el) => observeRow(el, board.id)" @click="openBoard(board.id)">
             <span class="row__main">
               <img v-if="thumbs.get(board.id)" class="row__thumb" :src="thumbs.get(board.id)" alt="" />
               <span v-else class="row__thumb row__thumb--empty" aria-hidden="true" />

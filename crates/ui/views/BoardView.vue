@@ -15,7 +15,7 @@ import {
   Table2,
   Type,
   Undo2,
-} from "@lucide/vue";
+} from "../icons";
 import { api } from "../api/client";
 import BaseButton from "../components/base/BaseButton.vue";
 import type { BlockKind } from "../api/types";
@@ -89,11 +89,13 @@ function fitToView(): void {
 }
 
 async function boot(): Promise<void> {
-  if (!config.snapshot) await config.load();
-  doc.usePolicy(config.snapshot?.config.autosave.intervalMs ?? 2000);
+  // 配置与打开画板互不依赖：并行跑，打开不等配置。
+  const configReady = config.snapshot ? Promise.resolve() : config.load();
   await doc.open(boardId.value);
   await nextTick();
   fitToView();
+  await configReady;
+  doc.usePolicy(config.snapshot?.config.autosave.intervalMs ?? 2000);
 }
 
 function onWheel(event: WheelEvent): void {

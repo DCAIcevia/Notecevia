@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from "vue";
-import { Search, X } from "@lucide/vue";
+import { Search, X } from "../../icons";
 
 // 输入立刻同步到 v-model；停下来一段时间才发 search，避免每个按键都触发一次查询。
 const props = withDefaults(

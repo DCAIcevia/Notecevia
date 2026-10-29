@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { Film, Music } from "@lucide/vue";
+import { Film, Music } from "../icons";
 import type { Body, Entry, Rgb } from "../api/types";
 import MediaImage from "./MediaImage.vue";
 
