@@ -5,6 +5,8 @@
 import type { Component } from "vue";
 
 import ArrowLeftIcon from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
+import BookOpenIcon from "@lucide/vue/dist/esm/icons/book-open.mjs";
+import TrashIcon from "@lucide/vue/dist/esm/icons/trash.mjs";
 import DownloadIcon from "@lucide/vue/dist/esm/icons/download.mjs";
 import FileCodeIcon from "@lucide/vue/dist/esm/icons/file-code-corner.mjs";
 import FilmIcon from "@lucide/vue/dist/esm/icons/film.mjs";
@@ -17,12 +19,15 @@ import PlusIcon from "@lucide/vue/dist/esm/icons/plus.mjs";
 import RedoIcon from "@lucide/vue/dist/esm/icons/redo-2.mjs";
 import SearchIcon from "@lucide/vue/dist/esm/icons/search.mjs";
 import SquareIcon from "@lucide/vue/dist/esm/icons/square.mjs";
+import GridIcon from "@lucide/vue/dist/esm/icons/layout-grid.mjs";
 import TableIcon from "@lucide/vue/dist/esm/icons/table-2.mjs";
 import TypeIcon from "@lucide/vue/dist/esm/icons/type.mjs";
 import UndoIcon from "@lucide/vue/dist/esm/icons/undo-2.mjs";
 import XIcon from "@lucide/vue/dist/esm/icons/x.mjs";
 
 export const ArrowLeft = ArrowLeftIcon as Component;
+export const BookOpen = BookOpenIcon as Component;
+export const Trash = TrashIcon as Component;
 export const Download = DownloadIcon as Component;
 export const FileCode2 = FileCodeIcon as Component;
 export const Film = FilmIcon as Component;
@@ -35,6 +40,7 @@ export const Plus = PlusIcon as Component;
 export const Redo2 = RedoIcon as Component;
 export const Search = SearchIcon as Component;
 export const Square = SquareIcon as Component;
+export const Grid = GridIcon as Component;
 export const Table2 = TableIcon as Component;
 export const Type = TypeIcon as Component;
 export const Undo2 = UndoIcon as Component;

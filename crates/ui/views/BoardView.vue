@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
-  ArrowLeft,
   Download,
   FileCode2,
   Highlighter,
@@ -17,7 +16,9 @@ import {
   Undo2,
 } from "../icons";
 import { api } from "../api/client";
+import AppShell from "../layout/AppShell.vue";
 import BaseButton from "../components/base/BaseButton.vue";
+import BoardListPane from "../components/BoardListPane.vue";
 import type { BlockKind } from "../api/types";
 import CanvasBlock from "../canvas/CanvasBlock.vue";
 import { renderThumbnail } from "../canvas/thumbnail";
@@ -471,11 +472,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="app-frame">
+  <AppShell>
+    <template #list>
+      <BoardListPane />
+    </template>
+
+    <div class="board">
     <header class="board__bar island">
-      <button class="board__back" type="button" aria-label="返回画板列表" @click="router.push({ name: 'home' })">
-        <ArrowLeft :size="16" :stroke-width="1.75" />
-      </button>
       <h1 class="board__title">{{ doc.document?.board.title ?? "画板" }}</h1>
 
       <span v-if="exportedPath" class="board__status board__status--ok">已导出 {{ exportedPath }}</span>
@@ -576,34 +579,25 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-  </main>
+    </div>
+  </AppShell>
 </template>
 
 <style scoped>
+.board {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .board__bar {
   display: flex;
   flex: none;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-}
-
-.board__back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.board__back:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
+  border-bottom: 1px solid var(--color-line);
 }
 
 .board__title {
