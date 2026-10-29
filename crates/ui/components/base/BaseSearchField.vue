@@ -82,11 +82,10 @@ onBeforeUnmount(() => window.clearTimeout(timer));
   color: var(--color-text-muted);
 }
 
-/* 只有键盘焦点才画环：鼠标点进来不画，免得看起来像被选中。
-   `:has(:focus-visible)` 让焦点提示保留给 Tab 用户。 */
-.search:has(.search__input:focus-visible) {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+/* 输入框的 :focus-visible 对文字输入永远成立，画环就等于“一直亮着”。
+   焦点提示改成只把边框换成本身已有的颜色，不加环、不改几何。 */
+.search:focus-within {
+  border-color: var(--color-accent);
 }
 
 .search__clear {

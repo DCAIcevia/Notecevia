@@ -543,19 +543,19 @@ onBeforeUnmount(() => {
 
       <div v-if="editingId === null" class="board__tools">
         <button class="chip" type="button" aria-label="新建文本" @click="createBlock('text')">
-          <Type :size="15" :stroke-width="1.75" />
+          <Type :size="17" :stroke-width="1.75" />
         </button>
         <button class="chip" type="button" aria-label="新建形状" @click="createBlock('shape')">
-          <Square :size="15" :stroke-width="1.75" />
+          <Square :size="17" :stroke-width="1.75" />
         </button>
         <button class="chip" type="button" aria-label="新建表格" @click="createBlock('table')">
-          <Table2 :size="15" :stroke-width="1.75" />
+          <Table2 :size="17" :stroke-width="1.75" />
         </button>
         <button class="chip" type="button" aria-label="新建高亮" @click="createBlock('highlight')">
-          <Highlighter :size="15" :stroke-width="1.75" />
+          <Highlighter :size="17" :stroke-width="1.75" />
         </button>
         <button class="chip" type="button" :disabled="importing" aria-label="插入媒体" @click="pickMedia">
-          <ImagePlus :size="15" :stroke-width="1.75" />
+          <ImagePlus :size="17" :stroke-width="1.75" />
         </button>
         <input
           ref="picker"
@@ -568,14 +568,14 @@ onBeforeUnmount(() => {
 
       <div class="board__zoom">
         <button class="chip" type="button" aria-label="缩小" @click="zoom(1 / 1.2)">
-          <Minus :size="14" :stroke-width="1.75" />
+          <Minus :size="15" :stroke-width="1.75" />
         </button>
         <span class="board__scale">{{ Math.round(viewport.scale.value * 100) }}%</span>
         <button class="chip" type="button" aria-label="放大" @click="zoom(1.2)">
-          <Plus :size="14" :stroke-width="1.75" />
+          <Plus :size="15" :stroke-width="1.75" />
         </button>
         <button class="chip" type="button" aria-label="适应窗口" @click="fitToView">
-          <Maximize :size="14" :stroke-width="1.75" />
+          <Maximize :size="15" :stroke-width="1.75" />
         </button>
       </div>
     </div>
@@ -588,6 +588,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: var(--space-3);
   min-height: 0;
 }
 
@@ -596,8 +597,8 @@ onBeforeUnmount(() => {
   flex: none;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-  border-bottom: 1px solid var(--color-line);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
 }
 
 .board__title {
@@ -692,13 +693,13 @@ onBeforeUnmount(() => {
 
 .board__tools {
   position: absolute;
-  bottom: var(--space-3);
+  bottom: var(--space-4);
   left: 50%;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1);
-  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
   background: var(--color-surface-overlay);
   box-shadow: var(--shadow-overlay);
   transform: translateX(-50%);
@@ -706,13 +707,13 @@ onBeforeUnmount(() => {
 
 .board__zoom {
   position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-3);
+  right: var(--space-4);
+  bottom: var(--space-4);
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1);
-  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
   background: var(--color-surface-overlay);
   box-shadow: var(--shadow-overlay);
 }
@@ -721,11 +722,11 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  min-width: 24px;
+  height: 28px;
+  min-width: 28px;
   padding: 0 var(--space-1);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: none;
   color: var(--color-text-muted);
   font-size: var(--text-sm);

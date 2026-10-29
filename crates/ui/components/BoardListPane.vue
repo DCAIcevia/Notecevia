@@ -231,7 +231,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
               title="重命名"
               @click="beginRename(board, $event)"
             >
-              <Pencil :size="13" :stroke-width="1.75" />
+              <Pencil :size="14" :stroke-width="1.75" />
             </button>
             <button
               class="row__action row__action--danger"
@@ -240,7 +240,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
               title="删除"
               @click="removeBoard(board, $event)"
             >
-              <Trash :size="13" :stroke-width="1.75" />
+              <Trash :size="14" :stroke-width="1.75" />
             </button>
           </span>
         </RouterLink>
@@ -405,13 +405,15 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
 }
 
 .row__action {
-  width: 20px;
-  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-muted);
-  font-size: var(--text-xs);
   cursor: pointer;
 }
 

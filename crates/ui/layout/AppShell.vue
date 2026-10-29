@@ -8,11 +8,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const route = useRoute();
 
-const items = [
+const primary = [
   { name: "home", label: "画板", icon: Grid },
   { name: "library", label: "册与书架", icon: BookOpen },
-  { name: "trash", label: "回收站", icon: Trash },
 ] as const;
+
+// 回收站是低频动作，压在导航栏底部，不跟日常导航混在一起。
+const secondary = { name: "trash", label: "回收站", icon: Trash } as const;
 
 type Direction = "North" | "South" | "East" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest";
 
@@ -38,7 +40,7 @@ function isActive(name: string): boolean {
     <main class="shell">
     <nav class="shell__rail">
       <RouterLink
-        v-for="item in items"
+        v-for="item in primary"
         :key="item.name"
         :to="{ name: item.name }"
         class="shell__nav"
@@ -47,6 +49,18 @@ function isActive(name: string): boolean {
         :title="item.label"
       >
         <component :is="item.icon" :size="18" :stroke-width="1.75" />
+      </RouterLink>
+
+      <span class="shell__spacer" />
+
+      <RouterLink
+        :to="{ name: secondary.name }"
+        class="shell__nav"
+        :class="{ 'shell__nav--active': isActive(secondary.name) }"
+        :aria-label="secondary.label"
+        :title="secondary.label"
+      >
+        <component :is="secondary.icon" :size="18" :stroke-width="1.75" />
       </RouterLink>
     </nav>
 
@@ -165,7 +179,11 @@ function isActive(name: string): boolean {
   gap: var(--space-1);
   align-items: center;
   width: 44px;
-  padding-top: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.shell__spacer {
+  flex: 1;
 }
 
 .shell__nav {
