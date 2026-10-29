@@ -43,6 +43,18 @@ const handleStyle = computed(() => {
   return { width: `${size}px`, height: `${size}px`, borderWidth: `${1.5 / props.zoom}px` };
 });
 
+const rotateStyle = computed(() => {
+  const size = 11 / props.zoom;
+  const offset = 22 / props.zoom;
+  return {
+    width: `${size}px`,
+    height: `${size}px`,
+    transform: `translate(-50%, -50%)`,
+    top: `-${offset}px`,
+    borderWidth: `${1.5 / props.zoom}px`,
+  };
+});
+
 const textStyle = computed(() => {
   const body = props.body;
   if (body?.kind !== "text") return {};
@@ -152,6 +164,7 @@ function onInput(event: Event): void {
         :data-handle="corner"
         :style="handleStyle"
       />
+      <span class="handle handle--rotate" data-handle="rotate" :style="rotateStyle" />
     </div>
   </div>
 </template>
@@ -214,6 +227,12 @@ function onInput(event: Event): void {
   left: 0;
   transform: translate(-50%, 50%);
   cursor: nesw-resize;
+}
+
+.handle--rotate {
+  left: 50%;
+  border-radius: 50%;
+  cursor: grab;
 }
 
 .text {

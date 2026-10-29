@@ -59,6 +59,10 @@ export const api = {
     call<WorkspaceStatus>("open_workspace", path === undefined ? undefined : { path }),
   workspaceStatus: () => call<WorkspaceStatus | null>("workspace_status"),
   listBoards: () => call<BoardSummary[]>("list_boards"),
+  rebuildIndex: () => call<number>("rebuild_index"),
+  exportContainer: (boardId: number) => call<string>("export_container", { boardId }),
+  exportHtml: (boardId: number) => call<string>("export_html", { boardId }),
+  saveThumbnail: (boardId: number, png: number[]) => call<null>("save_thumbnail", { boardId, png }),
   openBoard: (boardId: number) => call<DocumentDto>("open_board", { boardId }),
   createBoard: (title: string) => call<BoardSummary>("create_board", { title }),
   renameBoard: (boardId: number, title: string) => call<null>("rename_board", { boardId, title }),
@@ -67,6 +71,7 @@ export const api = {
   saveBoard: (boardId: number, document: DocumentDto) =>
     call<SaveResult>("save_board", { boardId, document }),
   readMedia: (hash: string) => call<ArrayBuffer>("read_media", { hash }),
+  readThumbnail: (boardId: number) => call<ArrayBuffer>("read_thumbnail", { boardId }),
   writeMedia: (name: string, data: number[]) => call<string>("write_media", { name, data }),
   listVolumes: () => call<VolumeSummary[]>("list_volumes"),
   loadVolume: (volumeId: number) => call<VolumeDto>("load_volume", { volumeId }),

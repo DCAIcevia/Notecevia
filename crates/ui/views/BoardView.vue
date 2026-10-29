@@ -1,11 +1,26 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowLeft, Highlighter, ImagePlus, Maximize, Minus, Plus, Redo2, Square, Table2, Type, Undo2 } from "@lucide/vue";
+import {
+  ArrowLeft,
+  Download,
+  FileCode2,
+  Highlighter,
+  ImagePlus,
+  Maximize,
+  Minus,
+  Plus,
+  Redo2,
+  Square,
+  Table2,
+  Type,
+  Undo2,
+} from "@lucide/vue";
 import { api } from "../api/client";
 import BaseButton from "../components/base/BaseButton.vue";
 import type { BlockKind } from "../api/types";
 import CanvasBlock from "../canvas/CanvasBlock.vue";
+import { renderThumbnail } from "../canvas/thumbnail";
 import { useViewport, type Box } from "../canvas/useViewport";
 import { useConfigStore } from "../stores/config";
 import { useDocumentStore } from "../stores/document";
@@ -21,6 +36,7 @@ const editingId = ref<number | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
 const importing = ref(false);
 const importError = ref<string | null>(null);
+const exportedPath = ref<string | null>(null);
 const viewport = useViewport();
 const panning = ref(false);
 
@@ -183,6 +199,19 @@ async function onFiles(event: Event): Promise<void> {
   }
 }
 
+async function exportAs(kind: "container" | "html"): Promise<void> {
+  importError.value = null;
+  exportedPath.value = null;
+  try {
+    exportedPath.value =
+      kind === "container"
+        ? await api.exportContainer(boardId.value)
+        : await api.exportHtml(boardId.value);
+  } catch (error) {
+    importError.value = (error as { message?: string }).message ?? "导出失败";
+  }
+}
+
 function removeSelected(): void {
   const id = selectedId.value;
   if (id === null) return;
@@ -201,6 +230,25 @@ let resizing: {
   base: { x: number; y: number; width: number; height: number };
 } | null = null;
 
+let rotating: {
+  id: number;
+  centerX: number;
+  centerY: number;
+  baseRotation: number;
+  startAngle: number;
+} | null = null;
+
+/** 指针在世界坐标里的位置。 */
+function worldPoint(event: PointerEvent): { x: number; y: number } {
+  const element = surface.value;
+  if (!element) return { x: 0, y: 0 };
+  const rect = element.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left - viewport.x.value) / viewport.scale.value,
+    y: (event.clientY - rect.top - viewport.y.value) / viewport.scale.value,
+  };
+}
+
 function onHandleDown(event: PointerEvent, handle: HTMLElement): void {
   const holder = handle.closest<HTMLElement>("[data-entry]");
   if (!holder) return;
@@ -209,6 +257,22 @@ function onHandleDown(event: PointerEvent, handle: HTMLElement): void {
   if (!entry || entry.locked) return;
   event.stopPropagation();
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+  if (handle.dataset.handle === "rotate") {
+    doc.beginGesture();
+    const point = worldPoint(event);
+    const centerX = entry.geometry.x + entry.geometry.width / 2;
+    const centerY = entry.geometry.y + entry.geometry.height / 2;
+    rotating = {
+      id,
+      centerX,
+      centerY,
+      baseRotation: entry.geometry.rotation,
+      startAngle: Math.atan2(point.y - centerY, point.x - centerX),
+    };
+    return;
+  }
+
   doc.beginGesture();
   resizing = {
     id,
@@ -217,6 +281,13 @@ function onHandleDown(event: PointerEvent, handle: HTMLElement): void {
     startY: event.clientY,
     base: { ...entry.geometry },
   };
+}
+
+function applyRotate(event: PointerEvent): void {
+  if (!rotating) return;
+  const point = worldPoint(event);
+  const angle = Math.atan2(point.y - rotating.centerY, point.x - rotating.centerX);
+  doc.setGeometry(rotating.id, { rotation: rotating.baseRotation + (angle - rotating.startAngle) });
 }
 
 function applyResize(event: PointerEvent): void {
@@ -293,6 +364,10 @@ function onPointerDown(event: PointerEvent): void {
 }
 
 function onPointerMove(event: PointerEvent): void {
+  if (rotating) {
+    applyRotate(event);
+    return;
+  }
   if (resizing) {
     applyResize(event);
     return;
@@ -317,6 +392,10 @@ function onDoubleClick(event: MouseEvent): void {
 }
 
 function onPointerUp(): void {
+  if (rotating) {
+    doc.endGesture();
+    rotating = null;
+  }
   if (resizing) {
     doc.endGesture();
     resizing = null;
@@ -359,6 +438,25 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
+let lastThumbnail = 0;
+
+// 缩略图是缓存：存盘成功后再画，按配置的间隔节流；画不出来不影响保存。
+watch(
+  () => doc.status,
+  async (status) => {
+    if (status !== "saved" || !doc.document) return;
+    const interval = config.snapshot?.config.autosave.thumbnailIntervalMs ?? 5000;
+    if (Date.now() - lastThumbnail < interval) return;
+    lastThumbnail = Date.now();
+    try {
+      const png = await renderThumbnail(doc.document);
+      if (png) await api.saveThumbnail(boardId.value, png);
+    } catch {
+      // 缩略图失败只影响列表里的预览。
+    }
+  },
+);
+
 onMounted(() => {
   void boot();
   window.addEventListener("keydown", onKeydown);
@@ -378,6 +476,7 @@ onBeforeUnmount(() => {
       </button>
       <h1 class="board__title">{{ doc.document?.board.title ?? "画板" }}</h1>
 
+      <span v-if="exportedPath" class="board__status board__status--ok">已导出 {{ exportedPath }}</span>
       <span v-if="importError" class="board__error">{{ importError }}</span>
       <span v-else-if="doc.status === 'failed'" class="board__error">{{ doc.saveError?.message }}</span>
       <span class="board__status" :class="{ 'board__status--failed': doc.status === 'failed' }">
@@ -389,6 +488,12 @@ onBeforeUnmount(() => {
       </button>
       <button class="chip" type="button" :disabled="doc.redoDepth === 0" aria-label="重做" @click="doc.redo()">
         <Redo2 :size="15" :stroke-width="1.75" />
+      </button>
+      <button class="chip" type="button" aria-label="导出容器" @click="exportAs('container')">
+        <Download :size="15" :stroke-width="1.75" />
+      </button>
+      <button class="chip" type="button" aria-label="导出 HTML" @click="exportAs('html')">
+        <FileCode2 :size="15" :stroke-width="1.75" />
       </button>
     </header>
 
@@ -534,6 +639,13 @@ onBeforeUnmount(() => {
 
 .board__status--failed {
   color: var(--color-danger);
+}
+
+.board__status--ok {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board__surface {
