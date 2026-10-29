@@ -40,6 +40,7 @@ cargo test --workspace
 - 运行界面：先 `pnpm install`，再 `pnpm tauri dev`。
 - 只预览前端：`pnpm dev`。
 - 前端检查：`pnpm build`（先跑 `vue-tsc --noEmit` 再打包）。
+- 前端测试：`pnpm test`（vitest，用例在 `crates/ui/**/*.spec.ts`）。
 - 打包：`pnpm tauri build`。
 - `clippy` 带 `-D warnings`，警告即失败；`fmt` 只检查，改写用 `cargo fmt --all`。
 - 工具链由 `rust-toolchain.toml` 固定，rustup 按该文件选择版本；workspace 用 `edition = "2024"`。
