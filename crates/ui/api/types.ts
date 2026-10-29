@@ -123,3 +123,8 @@ export interface AppConfigSnapshot {
   path: string;
   config: AppConfig;
 }
+export interface SearchHit {
+  boardId: number;
+  title: string;
+  snippet: string;
+}

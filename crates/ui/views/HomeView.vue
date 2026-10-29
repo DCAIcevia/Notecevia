@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import dayjs from "dayjs";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseEmptyState from "../components/base/BaseEmptyState.vue";
+import BaseSearchField from "../components/base/BaseSearchField.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
+import BaseTextField from "../components/base/BaseTextField.vue";
 import { api } from "../api/client";
+import type { BoardSummary, SearchHit } from "../api/types";
 import { useWorkspaceStore } from "../stores/workspace";
 
 const workspace = useWorkspaceStore();
@@ -13,6 +16,16 @@ const router = useRouter();
 
 const bootError = ref<string | null>(null);
 const creating = ref(false);
+const query = ref("");
+const hits = ref<SearchHit[]>([]);
+const searching = ref(false);
+const searchError = ref<string | null>(null);
+
+const renamingId = ref<number | null>(null);
+const renamingTitle = ref("");
+const actionError = ref<string | null>(null);
+
+const showingHits = computed(() => query.value.trim().length > 0);
 
 async function boot(): Promise<void> {
   bootError.value = null;
@@ -43,14 +56,70 @@ async function createBoard(): Promise<void> {
 function openBoard(id: number): void {
   router.push({ name: "board", params: { id } });
 }
+
+async function runSearch(value: string): Promise<void> {
+  query.value = value;
+  if (!value.trim()) {
+    hits.value = [];
+    searchError.value = null;
+    return;
+  }
+  searching.value = true;
+  try {
+    hits.value = await api.searchBoards(value.trim());
+    searchError.value = null;
+  } catch (error) {
+    searchError.value = (error as { message?: string }).message ?? "搜索失败";
+  } finally {
+    searching.value = false;
+  }
+}
+
+async function beginRename(board: BoardSummary): Promise<void> {
+  actionError.value = null;
+  renamingId.value = board.id;
+  renamingTitle.value = board.title;
+  await nextTick();
+}
+
+function cancelRename(): void {
+  renamingId.value = null;
+  renamingTitle.value = "";
+}
+
+async function commitRename(board: BoardSummary): Promise<void> {
+  const title = renamingTitle.value.trim();
+  if (renamingId.value !== board.id) return;
+  cancelRename();
+  if (!title || title === board.title) return;
+  try {
+    await api.renameBoard(board.id, title);
+    await workspace.refreshBoards();
+  } catch (error) {
+    actionError.value = (error as { message?: string }).message ?? "改名失败";
+  }
+}
+
+async function removeBoard(board: BoardSummary): Promise<void> {
+  actionError.value = null;
+  try {
+    await api.deleteBoard(board.id);
+    await workspace.refreshBoards();
+  } catch (error) {
+    actionError.value = (error as { message?: string }).message ?? "删除失败";
+  }
+}
 </script>
 
 <template>
   <main class="home">
     <header class="home__bar">
       <h1 class="home__title">画板</h1>
+      <BaseSearchField class="home__search" placeholder="搜索画板" @search="runSearch" />
       <BaseButton :disabled="creating" @click="createBoard">新建画板</BaseButton>
     </header>
+
+    <p v-if="actionError" class="home__error">{{ actionError }}</p>
 
     <div v-if="bootError" class="home__state">
       <p class="home__error">{{ bootError }}</p>
@@ -66,6 +135,21 @@ function openBoard(id: number): void {
       <BaseButton size="sm" @click="workspace.refreshBoards()">重试</BaseButton>
     </div>
 
+    <template v-else-if="showingHits">
+      <p v-if="searchError" class="home__error">{{ searchError }}</p>
+      <p v-else-if="searching" class="home__hint">正在搜索</p>
+      <p v-else-if="hits.length === 0" class="home__hint">没有命中的画板</p>
+
+      <ul class="home__list">
+        <li v-for="hit in hits" :key="hit.boardId">
+          <button class="row" type="button" @click="openBoard(hit.boardId)">
+            <span class="row__title">{{ hit.title }}</span>
+            <span class="row__snippet">{{ hit.snippet }}</span>
+          </button>
+        </li>
+      </ul>
+    </template>
+
     <BaseEmptyState
       v-else-if="workspace.boards.length === 0"
       title="还没有画板"
@@ -77,11 +161,28 @@ function openBoard(id: number): void {
     </BaseEmptyState>
 
     <ul v-else class="home__list">
-      <li v-for="board in workspace.boards" :key="board.id">
-        <button class="row" type="button" @click="openBoard(board.id)">
-          <span class="row__title">{{ board.title }}</span>
-          <span class="row__meta">{{ board.entryCount }} 块 · {{ formatTime(board.updatedAt) }}</span>
-        </button>
+      <li v-for="board in workspace.boards" :key="board.id" class="item">
+        <BaseTextField
+          v-if="renamingId === board.id"
+          v-model="renamingTitle"
+          class="item__rename"
+          placeholder="画板名"
+          @keydown.enter.prevent="commitRename(board)"
+          @keydown.esc.prevent="cancelRename"
+          @blur="commitRename(board)"
+        />
+        <template v-else>
+          <button class="row" type="button" @click="openBoard(board.id)">
+            <span class="row__title">{{ board.title }}</span>
+            <span class="row__meta">{{ board.entryCount }} 块 · {{ formatTime(board.updatedAt) }}</span>
+          </button>
+          <span class="item__actions">
+            <button class="item__action" type="button" @click="beginRename(board)">改名</button>
+            <button class="item__action item__action--danger" type="button" @click="removeBoard(board)">
+              删除
+            </button>
+          </span>
+        </template>
       </li>
     </ul>
   </main>
@@ -98,16 +199,20 @@ function openBoard(id: number): void {
 .home__bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  max-width: 720px;
+  gap: var(--space-3);
+  max-width: 760px;
   margin: 0 auto var(--space-4);
 }
 
 .home__title {
+  flex: none;
   font-size: var(--text-xl);
   font-weight: 600;
   line-height: var(--leading-tight);
+}
+
+.home__search {
+  flex: 1;
 }
 
 .home__state {
@@ -119,26 +224,42 @@ function openBoard(id: number): void {
 }
 
 .home__error {
+  max-width: 760px;
+  margin: 0 auto var(--space-2);
   color: var(--color-danger);
+}
+
+.home__hint {
+  max-width: 760px;
+  margin: 0 auto var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
 .home__list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 0;
   list-style: none;
 }
 
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .row {
   display: flex;
+  flex: 1;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
-  width: 100%;
-  padding: var(--space-3) var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-surface-content);
@@ -153,8 +274,8 @@ function openBoard(id: number): void {
 }
 
 .row__title {
-  font-size: var(--text-base);
   overflow: hidden;
+  font-size: var(--text-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -164,5 +285,58 @@ function openBoard(id: number): void {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.row__snippet {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item__actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.item:hover .item__actions,
+.item:focus-within .item__actions {
+  opacity: 1;
+}
+
+.item__action {
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.item__action:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.item__action--danger:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.item__rename {
+  flex: 1;
+}
+
+.item__rename :deep(.field) {
+  width: 100%;
+}
+
+.item__rename :deep(.field__input) {
+  width: 100%;
 }
 </style>

@@ -9,6 +9,7 @@ import type {
   DocumentDto,
   IpcFailure,
   SaveResult,
+  SearchHit,
   WorkspaceStatus,
 } from "./types";
 
@@ -55,6 +56,9 @@ export const api = {
   listBoards: () => call<BoardSummary[]>("list_boards"),
   openBoard: (boardId: number) => call<DocumentDto>("open_board", { boardId }),
   createBoard: (title: string) => call<BoardSummary>("create_board", { title }),
+  renameBoard: (boardId: number, title: string) => call<null>("rename_board", { boardId, title }),
+  deleteBoard: (boardId: number) => call<null>("delete_board", { boardId }),
+  searchBoards: (query: string) => call<SearchHit[]>("search_boards", { query }),
   saveBoard: (boardId: number, document: DocumentDto) =>
     call<SaveResult>("save_board", { boardId, document }),
   readMedia: (hash: string) => call<ArrayBuffer>("read_media", { hash }),
