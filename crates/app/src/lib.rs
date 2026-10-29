@@ -7,19 +7,12 @@ pub mod ipc;
 
 use ipc::AppState;
 
-/// 示例命令：确认前端能调到 Rust 侧。
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {name}! You've been greeted from Rust!")
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
-            greet,
             ipc::state::app_info,
             ipc::state::open_workspace,
             ipc::state::workspace_status,

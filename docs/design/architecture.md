@@ -11,7 +11,7 @@
 
 依赖方向单向：`core` ← `store`、`core` ← `crates/app`、`store` ← `crates/app`；`crates/app` 以路径依赖引用 `core`、`store`，另依赖 `tauri` 与 `tauri-plugin-opener`。
 
-前端经 Tauri 命令调用窗口壳；命令契约见 `docs/design/ipc.md`，`greet` 是遗留示例命令，前端界面尚未接上。
+前端经 Tauri 命令调用窗口壳；命令契约见 `docs/design/ipc.md`，前端界面刚起外壳，命令尚未接上。
 
 以下加载、保存与交互规则描述目标行为；其中自动保存、缩略图生成与索引刷新由界面层驱动，新界面尚未实现。
 

@@ -5,7 +5,7 @@
 - 前端 `crates/ui` 通过 Tauri 的 `invoke` 调窗口壳 `crates/app` 注册的命令；命令层在 `crates/app/src/ipc/`，注册表在 `crates/app/src/lib.rs` 的 `generate_handler!`。
 - 命令层只做参数转换、调用 `core`／`store`、把错误换成 `IpcError`；业务规则不写在这一层。
 - 依赖单向：`crates/ui` → `crates/app` → `core`、`store`；`store` → `core`。
-- 注册表共 41 条命令：40 条 IPC 命令加 1 条遗留示例 `greet`（前端样板还在用，界面重写时删除）。
+- 注册表共 40 条命令。
 - 参数名按 Tauri 约定用 camelCase（`boardId`、`fileName`），与 Rust 侧的 snake_case 对应。
 - 时间属于应用边界：存盘与回收站倒计时用的 Unix 秒由命令层取，再传给 `store`。
 

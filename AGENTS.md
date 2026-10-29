@@ -58,8 +58,6 @@ cargo test --workspace
 
 依赖单向：`crates/app` 以路径依赖引用 `crates/core`、`crates/store`，IPC 命令已经接上；`store` → `core`；`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
 
-`greet` 是遗留示例命令，前端样板还在用，界面重写时删除。
-
 根 workspace 的成员只有 `crates/core`、`crates/store`、`crates/app`，所以根上的 `cargo test --workspace` 会编译窗口壳。
 
 每个 Rust crate 顶部有 `#![deny(rustdoc::broken_intra_doc_links)]`，并有 `#![forbid(unsafe_code)]`，新增模块沿用。`crates/app` 依赖 `tauri` 与 `tauri-plugin-opener`，前端依赖 Vue。其余标准库能合理实现就不加。
