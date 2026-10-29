@@ -26,6 +26,11 @@ export default defineConfig(() => ({
           port: 1421,
         }
       : undefined,
+    // 启动时先把界面源码转换一遍：窗口加载时这些模块已经是热的，
+    // 用户看到的白屏少一节。代价放在服务器启动阶段，那时还没有窗口。
+    warmup: {
+      clientFiles: ["./crates/ui/main.ts", "./crates/ui/**/*.vue", "./crates/ui/**/*.ts"],
+    },
     watch: {
       // 3. 窗口壳在 crates/app，不跟着它重启前端
       // 4. target 里是 Rust 构建产物（三万个文件），盯它只会白烧 CPU
