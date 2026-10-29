@@ -3,6 +3,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![forbid(unsafe_code)]
 
+pub mod config;
 pub mod ipc;
 
 use ipc::AppState;
@@ -13,6 +14,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
+            ipc::config::app_config,
+            ipc::config::save_app_config,
             ipc::state::app_info,
             ipc::state::open_workspace,
             ipc::state::workspace_status,

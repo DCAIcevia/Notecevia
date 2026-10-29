@@ -5,9 +5,26 @@
 - 前端 `crates/ui` 通过 Tauri 的 `invoke` 调窗口壳 `crates/app` 注册的命令；命令层在 `crates/app/src/ipc/`，注册表在 `crates/app/src/lib.rs` 的 `generate_handler!`。
 - 命令层只做参数转换、调用 `core`／`store`、把错误换成 `IpcError`；业务规则不写在这一层。
 - 依赖单向：`crates/ui` → `crates/app` → `core`、`store`；`store` → `core`。
-- 注册表共 40 条命令。
+- 注册表共 42 条命令。
 - 参数名按 Tauri 约定用 camelCase（`boardId`、`fileName`），与 Rust 侧的 snake_case 对应。
 - 时间属于应用边界：存盘与回收站倒计时用的 Unix 秒由命令层取，再传给 `store`。
+
+## 应用配置
+
+- 配置放在程序的配置目录下（`app_config_dir`），与工作区无关：换工作区不换策略，工作区仍然是能整份拷走的数据单位。
+- 文件是 `config.json`，字段 camelCase。缺字段用默认值；文件缺失或读不懂也用默认值——配置不是内容，坏了不挡打开。
+- 写盘先写临时文件、`sync_all` 后改名。写失败返回 `io`，不退回内存状态。
+- 工作区没打开也能调这两个命令。
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `app_config` | 无 | `AppConfigSnapshot`：`path` 与 `config` |
+| `save_app_config` | `config: AppConfig` | `null` |
+
+| 形状 | 字段 |
+| --- | --- |
+| `AppConfig` | `autosave` |
+| `AutosavePolicy` | `intervalMs`（默认 2000）、`thumbnailIntervalMs`（默认 5000） |
 
 ## 工作区
 
