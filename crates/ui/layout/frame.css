@@ -57,3 +57,13 @@
 .item + .item {
   border-top: 1px solid var(--color-line);
 }
+/* 插件画的窗口按钮默认 58 宽，比 Windows 惯例的 46 明显宽；
+   这里收窄并把高度拉满标题栏，悬停底色才不会只盖住中间一截。
+   选择器带 :root 前缀，特异度高于插件自带的样式，不依赖加载顺序。 */
+:root
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-platform="windows"]
+  [data-tauri-decoration-control] {
+  width: 46px;
+  height: var(--tauri-plugin-decoration-titlebar-height, 34px);
+}
