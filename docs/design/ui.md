@@ -50,8 +50,21 @@
 - 圆角四档：`sm` 4px、`md` 6px、`lg` 8px、`xl` 12px，另有一档 `pill`。
 - 嵌套时内层圆角 = 外层圆角 − 内边距，最小 2px；不内缩就会出现尖角。
 
+## 视图与画布
+
+| 视图 | 文件 | 内容 |
+| --- | --- | --- |
+| 首页 | `crates/ui/views/HomeView.vue` | 画板列表、新建画板、加载与错误态、空态 |
+| 画板 | `crates/ui/views/BoardView.vue` | 顶栏、画布视口、缩放控件、打开失败重试 |
+
+- 画布两层：视口层只做平移与缩放，靠 `transform` 完成；块层按世界坐标绝对定位，缩放不触发重排。
+- 块在 `crates/ui/canvas/CanvasBlock.vue` 绘制，种类由正文的 `kind` 决定；视频与音频共用 `media` 正文。
+- 媒体按内容哈希取一次，同一哈希复用同一个 ObjectURL。
+- 数据从 `crates/ui/api/` 进出：`types.ts` 对应 IPC 形状，`client.ts` 只做参数与错误规整。
+- 地址带 `?mock` 且是开发构建时，前端改用 `crates/ui/api/mock.ts` 的假数据；生产构建不包含这段。
+
 ## 入口
 
-- `crates/ui/main.ts` 依次引入主题文件与基础规则，再挂载 `App.vue`。
-- `App.vue` 是应用外壳，视图容器接真实视图。
-- `crates/ui/preview/UiPreview.vue` 是界面验收页：主题变量与基础组件摊开显示，真实视图接上后删除。
+- `crates/ui/main.ts` 依次引入主题文件与基础规则，挂上 pinia 与路由后挂载 `App.vue`。
+- `App.vue` 只放 `RouterView`。
+- `crates/ui/preview/UiPreview.vue` 是界面验收页：主题变量与基础组件摊开显示。
