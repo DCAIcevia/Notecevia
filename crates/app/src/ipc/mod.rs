@@ -7,6 +7,7 @@
 
 pub mod boards;
 pub mod config;
+pub mod decoration;
 pub mod dto;
 pub mod error;
 pub mod health;

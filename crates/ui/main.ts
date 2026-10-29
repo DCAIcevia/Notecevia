@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import App from "./App.vue";
 import { router } from "./router";
 import { useConfigStore } from "./stores/config";
+import { useShellStore } from "./stores/shell";
 import "./theme/default.css";
 import "./theme/base.css";
 import "./layout/frame.css";
@@ -28,6 +29,9 @@ if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("debu
     }
   }, 50);
 }
+
+// 窗口先隐藏启动，这里换成自绘外观并露出窗口；失败就退回系统标题栏。
+void useShellStore(pinia).activate();
 
 // 配置读不到不挡界面，缺省值照常工作。
 void useConfigStore(pinia).load();

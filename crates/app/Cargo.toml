@@ -19,5 +19,6 @@ notecevia-core = { path = "../core" }
 notecevia-store = { path = "../store" }
 tauri.workspace = true
 tauri-plugin-opener.workspace = true
+tauri-plugin-decoration = "3.0.5"
 serde.workspace = true
 serde_json.workspace = true

@@ -1,3 +1,9 @@
+/* 标题栏：自绘时高 34，插件按这个值对齐它画的窗口按钮。 */
+:root {
+  --titlebar-height: 34px;
+  --tauri-plugin-decoration-titlebar-height: 34px;
+}
+
 /* 岛屿化布局：窗口是一块底，内容放在一两块浮起的岛上。
    规则只有几条：内缩固定、岛之间留缝、圆角统一、阴影用最轻的一档。 */
 

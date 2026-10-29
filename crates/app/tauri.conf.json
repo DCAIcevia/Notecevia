@@ -11,8 +11,12 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Notecevia",
-        "decorations": false,
+        "decorations": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "width": 1120,
         "height": 720,
         "minWidth": 720,

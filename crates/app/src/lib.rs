@@ -12,15 +12,30 @@ use ipc::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 装饰插件必须在创建窗口之前注册。
+        .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .manage(watchdog::Heartbeat::new())
         .setup(|app| {
             // 前端脚本挂死时窗口要能自己关掉：六十秒没有心跳就退出。
             watchdog::spawn(app.handle().clone(), std::time::Duration::from_secs(60));
+
+            // 窗口先隐藏等自绘装饰激活；前端起不来也要露出窗口，别留个看不见的进程。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+                if let Some(window) = tauri::Manager::get_webview_window(&handle, "main")
+                    && !window.is_visible().unwrap_or(false)
+                {
+                    let _ = window.show();
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ipc::decoration::activate_and_show,
             ipc::health::heartbeat,
             ipc::config::app_config,
             ipc::config::save_app_config,
