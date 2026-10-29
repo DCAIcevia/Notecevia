@@ -48,11 +48,13 @@ cargo test --workspace
 | 目录 | 包名 | 职责 |
 | --- | --- | --- |
 | `crates/ui` | 前端包 `notecevia` | 界面层：Vue 3 + Vite 前端源码；构建入口 `index.html`、`package.json`、`vite.config.ts`、`tsconfig.json`、`tsconfig.node.json`、`public/` 在仓库根 |
-| `crates/app` | `notecevia` | 窗口壳：Tauri 2，二进制名 `notecevia`，前端与 Rust 内核之间的桥 |
+| `crates/app` | `notecevia` | 窗口壳：Tauri 2，二进制名 `notecevia`；IPC 命令层在 `crates/app/src/ipc/`，把 `core`／`store` 包成前端可调的命令 |
 | `crates/core` | `notecevia-core` | 领域逻辑与用例 |
 | `crates/store` | `notecevia-store` | 文件读写与索引 |
 
-依赖单向：`crates/app` 负责把前端接到 `crates/core`、`crates/store`（当前壳只注册了示例命令，还没接上）；`store` → `core`；`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
+依赖单向：`crates/app` 以路径依赖引用 `crates/core`、`crates/store`，IPC 命令已经接上；`store` → `core`；`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。
+
+`greet` 是遗留示例命令，前端样板还在用，界面重写时删除。
 
 根 workspace 的成员只有 `crates/core`、`crates/store`、`crates/app`，所以根上的 `cargo test --workspace` 会编译窗口壳。
 
