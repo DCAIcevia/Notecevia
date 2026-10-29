@@ -141,12 +141,78 @@ function removeSelected(): void {
 }
 
 let panOrigin = { x: 0, y: 0 };
+let resizing: {
+  id: number;
+  corner: string;
+  startX: number;
+  startY: number;
+  base: { x: number; y: number; width: number; height: number };
+} | null = null;
+
+function onHandleDown(event: PointerEvent, handle: HTMLElement): void {
+  const holder = handle.closest<HTMLElement>("[data-entry]");
+  if (!holder) return;
+  const id = Number(holder.dataset.entry);
+  const entry = doc.entry(id);
+  if (!entry || entry.locked) return;
+  event.stopPropagation();
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  doc.beginGesture();
+  resizing = {
+    id,
+    corner: handle.dataset.handle ?? "se",
+    startX: event.clientX,
+    startY: event.clientY,
+    base: { ...entry.geometry },
+  };
+}
+
+function applyResize(event: PointerEvent): void {
+  if (!resizing) return;
+  const dx = (event.clientX - resizing.startX) / viewport.scale.value;
+  const dy = (event.clientY - resizing.startY) / viewport.scale.value;
+  const { base, corner } = resizing;
+  const MIN = 20;
+  let { x, y } = base;
+  let width = base.width;
+  let height = base.height;
+
+  if (corner.includes("w")) {
+    x = base.x + dx;
+    width = base.width - dx;
+  } else if (corner.includes("e")) {
+    width = base.width + dx;
+  }
+  if (corner.includes("n")) {
+    y = base.y + dy;
+    height = base.height - dy;
+  } else if (corner.includes("s")) {
+    height = base.height + dy;
+  }
+
+  if (width < MIN) {
+    width = MIN;
+    if (corner.includes("w")) x = base.x + base.width - MIN;
+  }
+  if (height < MIN) {
+    height = MIN;
+    if (corner.includes("n")) y = base.y + base.height - MIN;
+  }
+
+  doc.setGeometry(resizing.id, { x, y, width, height });
+}
 let moving: { id: number; startX: number; startY: number; baseX: number; baseY: number; changed: boolean } | null =
   null;
 
 function onPointerDown(event: PointerEvent): void {
   if (event.button !== 0) return;
-  const holder = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-entry]");
+  const target = event.target as HTMLElement | null;
+  const handle = target?.closest<HTMLElement>("[data-handle]");
+  if (handle) {
+    onHandleDown(event, handle);
+    return;
+  }
+  const holder = target?.closest<HTMLElement>("[data-entry]");
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
   if (holder) {
@@ -175,6 +241,10 @@ function onPointerDown(event: PointerEvent): void {
 }
 
 function onPointerMove(event: PointerEvent): void {
+  if (resizing) {
+    applyResize(event);
+    return;
+  }
   if (moving) {
     const dx = (event.clientX - moving.startX) / viewport.scale.value;
     const dy = (event.clientY - moving.startY) / viewport.scale.value;
@@ -195,6 +265,10 @@ function onDoubleClick(event: MouseEvent): void {
 }
 
 function onPointerUp(): void {
+  if (resizing) {
+    doc.endGesture();
+    resizing = null;
+  }
   if (moving) {
     doc.endGesture();
     moving = null;
@@ -284,6 +358,7 @@ onBeforeUnmount(() => {
           :body="item.body"
           :selected="selectedId === item.entry.id"
           :editing="editingId === item.entry.id"
+          :zoom="viewport.scale.value"
           @text="doc.setText(item.entry.id, $event)"
           @commit="commitEdit"
         />

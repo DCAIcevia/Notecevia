@@ -5,9 +5,17 @@ import type { Body, Entry, Rgb } from "../api/types";
 import MediaImage from "./MediaImage.vue";
 
 const props = withDefaults(
-  defineProps<{ entry: Entry; body: Body | undefined; selected?: boolean; editing?: boolean }>(),
-  { selected: false, editing: false },
+  defineProps<{
+    entry: Entry;
+    body: Body | undefined;
+    selected?: boolean;
+    editing?: boolean;
+    zoom?: number;
+  }>(),
+  { selected: false, editing: false, zoom: 1 },
 );
+
+const CORNERS = ["nw", "ne", "se", "sw"] as const;
 
 const emit = defineEmits<{ text: [value: string]; commit: [] }>();
 
@@ -27,6 +35,12 @@ const frame = computed(() => {
     transform: geometry.rotation ? `rotate(${geometry.rotation}rad)` : undefined,
     zIndex: props.entry.z,
   };
+});
+
+// 手柄按屏幕尺寸画：层被缩放后仍保持同样大的点击区域。
+const handleStyle = computed(() => {
+  const size = 9 / props.zoom;
+  return { width: `${size}px`, height: `${size}px`, borderWidth: `${1.5 / props.zoom}px` };
 });
 
 const textStyle = computed(() => {
@@ -128,6 +142,17 @@ function onInput(event: Event): void {
       <component :is="entry.kind === 'video' ? Film : Music" :size="18" :stroke-width="1.5" />
       <span class="placeholder__name">{{ body.name || "未命名" }}</span>
     </div>
+
+    <div v-if="selected && !editing && !entry.locked" class="handles" aria-hidden="true">
+      <span
+        v-for="corner in CORNERS"
+        :key="corner"
+        class="handle"
+        :class="`handle--${corner}`"
+        :data-handle="corner"
+        :style="handleStyle"
+      />
+    </div>
   </div>
 </template>
 
@@ -145,6 +170,50 @@ function onInput(event: Event): void {
 .block--editing {
   box-shadow: 0 0 0 2px var(--color-accent);
   cursor: text;
+}
+
+.handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.handle {
+  position: absolute;
+  display: block;
+  border-style: solid;
+  border-color: var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-content);
+  pointer-events: auto;
+}
+
+.handle--nw {
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  cursor: nwse-resize;
+}
+
+.handle--ne {
+  top: 0;
+  right: 0;
+  transform: translate(50%, -50%);
+  cursor: nesw-resize;
+}
+
+.handle--se {
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
+  cursor: nwse-resize;
+}
+
+.handle--sw {
+  bottom: 0;
+  left: 0;
+  transform: translate(-50%, 50%);
+  cursor: nesw-resize;
 }
 
 .text {

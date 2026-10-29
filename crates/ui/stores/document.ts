@@ -122,6 +122,14 @@ export const useDocumentStore = defineStore("document", () => {
     triggerRef(document);
   }
 
+  /** 缩放与拖动都走这里：只改几何，置脏与撤销交给手势结束。 */
+  function setGeometry(id: number, geometry: Partial<Geometry>): void {
+    const target = entry(id);
+    if (!target) return;
+    Object.assign(target.geometry, geometry);
+    triggerRef(document);
+  }
+
   /** 拖动时逐帧调用：只改坐标，置脏与撤销交给手势结束。 */
   function moveEntry(id: number, x: number, y: number): void {
     const target = entry(id);
@@ -225,6 +233,7 @@ export const useDocumentStore = defineStore("document", () => {
     addEntry,
     removeEntry,
     setText,
+    setGeometry,
     moveEntry,
     beginGesture,
     endGesture,
