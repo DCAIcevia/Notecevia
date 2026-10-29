@@ -46,6 +46,13 @@ const encoder = new TextEncoder();
 
 export async function mockInvoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (command) {
+    case "app_config":
+      return {
+        path: "mock/config.json",
+        config: { autosave: { intervalMs: 2000, thumbnailIntervalMs: 5000 } },
+      };
+    case "save_app_config":
+      return null;
     case "app_info":
       return { version: "0.2.0-alpha.1", defaultWorkspace: "mock" };
     case "open_workspace":

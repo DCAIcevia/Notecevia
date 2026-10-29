@@ -110,3 +110,16 @@ export interface IpcFailure {
   kind: string;
   message: string;
 }
+export interface AutosavePolicy {
+  intervalMs: number;
+  thumbnailIntervalMs: number;
+}
+
+export interface AppConfig {
+  autosave: AutosavePolicy;
+}
+
+export interface AppConfigSnapshot {
+  path: string;
+  config: AppConfig;
+}

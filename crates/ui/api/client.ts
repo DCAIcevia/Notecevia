@@ -2,6 +2,8 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
+  AppConfig,
+  AppConfigSnapshot,
   AppInfo,
   BoardSummary,
   DocumentDto,
@@ -44,6 +46,8 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 export const api = {
+  appConfig: () => call<AppConfigSnapshot>("app_config"),
+  saveAppConfig: (config: AppConfig) => call<null>("save_app_config", { config }),
   appInfo: () => call<AppInfo>("app_info"),
   openWorkspace: (path?: string) =>
     call<WorkspaceStatus>("open_workspace", path === undefined ? undefined : { path }),
