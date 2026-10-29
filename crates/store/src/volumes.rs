@@ -310,18 +310,34 @@ impl Workspace {
             let folder = format!("{stamp}-{KIND}-{id}");
             self.move_to_trash(&path, &folder)?;
         }
-        self.detach_volume_from_shelves(id, stamp)
+        self.detach_volume_from_shelves(id, None, stamp)
     }
 
-    /// 把一个册编号从所有书架里摘掉。读不懂书架跳过它自己：架子上指向已删册的编号
-    /// 本来也会在读的时候丢掉。
-    fn detach_volume_from_shelves(&self, volume: u64, stamp: i64) -> Result<(), Error> {
+    /// 把一个册编号从书架上摘掉，`keep` 那层除外。摘空的架子跟着进回收站：
+    /// 一层书架要有两本册才成立，零本就不该留着。读不懂的书架跳过它自己：
+    /// 架子上指向已删册的编号本来也会在读的时候丢掉。
+    pub(crate) fn detach_volume_from_shelves(
+        &self,
+        volume: u64,
+        keep: Option<u64>,
+        stamp: i64,
+    ) -> Result<(), Error> {
         for id in self.shelf_ids()? {
+            if Some(id) == keep {
+                continue;
+            }
             let Some(on_disk) = self.read_shelf_lenient(id)? else {
                 continue;
             };
             let mut shelf = on_disk.shelf;
-            if shelf.remove_volume(volume) {
+            if !shelf.remove_volume(volume) {
+                continue;
+            }
+            // 指向已删册的编号在读的时候本来就会丢，写回时顺手清掉。
+            shelf.volumes.retain(|held| self.volume_exists(*held));
+            if shelf.volumes.is_empty() {
+                self.delete_shelf(id)?;
+            } else {
                 self.save_shelf_at(id, &shelf, stamp)?;
             }
         }

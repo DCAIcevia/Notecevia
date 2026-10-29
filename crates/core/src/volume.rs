@@ -14,6 +14,9 @@ pub const EMPTY_BOOK_ID: u64 = 0;
 /// 默认册的标题。工作区打开时用它建出 `volumes/0.volume`。
 pub const EMPTY_BOOK_TITLE: &str = "Empty book";
 
+/// 一层书架至少要有这么多册。少于这个数不成架：书架由两册合成。
+pub const MIN_SHELF_VOLUMES: usize = 2;
+
 /// 册：一本书。`pages` 是有序的页编号，也是这些页的归属。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Volume {

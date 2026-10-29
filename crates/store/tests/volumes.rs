@@ -528,3 +528,90 @@ fn shelf_ids_are_not_reused_after_delete() {
         .expect("存书架");
     assert_eq!(temp.workspace.next_shelf().expect("下一个书架号"), 4);
 }
+
+#[test]
+fn a_shelf_needs_two_volumes_to_be_formed() {
+    let temp = TempWorkspace::new("shelf-minimum");
+    save_volume_with(&temp.workspace, 1, "甲", &[]);
+    save_volume_with(&temp.workspace, 2, "乙", &[]);
+
+    assert!(matches!(
+        temp.workspace.create_shelf_with("孤本".to_owned(), vec![1]),
+        Err(Error::ShelfTooSmall)
+    ));
+    assert!(temp.workspace.list_shelves().expect("列架").is_empty());
+
+    let shelf = temp
+        .workspace
+        .create_shelf_with("两本".to_owned(), vec![1, 2])
+        .expect("合成架");
+    assert_eq!(shelf.volume_count, 2);
+    assert_eq!(
+        temp.workspace.load_shelf(shelf.id).expect("读架").volumes,
+        vec![1, 2]
+    );
+}
+
+#[test]
+fn shelving_a_volume_moves_it_off_its_old_shelf() {
+    let temp = TempWorkspace::new("shelf-exclusive");
+    save_volume_with(&temp.workspace, 1, "甲", &[]);
+    save_volume_with(&temp.workspace, 2, "乙", &[]);
+    save_volume_with(&temp.workspace, 3, "丙", &[]);
+    let mut old = Shelf::new("旧架");
+    old.insert_volume(0, 1);
+    old.insert_volume(1, 2);
+    temp.workspace.save_shelf(1, &old).expect("存旧架");
+    let mut target = Shelf::new("新架");
+    target.insert_volume(0, 3);
+    temp.workspace.save_shelf(2, &target).expect("存新架");
+
+    temp.workspace.shelve_volume(2, 2).expect("上架");
+
+    assert_eq!(temp.workspace.load_shelf(1).expect("旧架").volumes, vec![1]);
+    assert_eq!(
+        temp.workspace.load_shelf(2).expect("新架").volumes,
+        vec![3, 2]
+    );
+}
+
+#[test]
+fn unshelving_the_last_volume_sends_the_shelf_to_the_trash() {
+    let temp = TempWorkspace::new("shelf-dissolve");
+    save_volume_with(&temp.workspace, 1, "甲", &[]);
+    save_volume_with(&temp.workspace, 2, "乙", &[]);
+    let shelf = temp
+        .workspace
+        .create_shelf_with("散架".to_owned(), vec![1, 2])
+        .expect("合成架");
+
+    temp.workspace
+        .unshelve_volume(shelf.id, 1)
+        .expect("拿掉一本");
+    assert_eq!(
+        temp.workspace
+            .load_shelf(shelf.id)
+            .expect("还剩一本")
+            .volumes,
+        vec![2]
+    );
+
+    temp.workspace
+        .unshelve_volume(shelf.id, 2)
+        .expect("拿掉最后一本");
+    assert!(!temp.path(&format!("shelves/{}.shelf", shelf.id)).exists());
+    assert_eq!(files_with_extension(&temp.path(".trash"), "shelf").len(), 1);
+}
+
+#[test]
+fn deleting_the_last_volume_takes_its_shelf() {
+    let temp = TempWorkspace::new("shelf-volume-delete");
+    save_volume_with(&temp.workspace, 1, "甲", &[]);
+    let mut shelf = Shelf::new("只剩它");
+    shelf.insert_volume(0, 1);
+    temp.workspace.save_shelf(1, &shelf).expect("存架");
+
+    temp.workspace.delete_volume(1).expect("删册");
+    assert!(!temp.path("shelves/1.shelf").exists());
+    assert_eq!(files_with_extension(&temp.path(".trash"), "shelf").len(), 1);
+}

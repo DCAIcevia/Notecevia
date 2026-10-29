@@ -5,7 +5,7 @@
 - 前端 `crates/ui` 通过 Tauri 的 `invoke` 调窗口壳 `crates/app` 注册的命令；命令层在 `crates/app/src/ipc/`，注册表在 `crates/app/src/lib.rs` 的 `generate_handler!`。
 - 命令层只做参数转换、调用 `core`／`store`、把错误换成 `IpcError`；业务规则不写在这一层。
 - 依赖单向：`crates/ui` → `crates/app` → `core`、`store`；`store` → `core`。
-- 注册表共 42 条命令。
+- 注册表共 48 条命令。
 - 参数名按 Tauri 约定用 camelCase（`boardId`、`fileName`），与 Rust 侧的 snake_case 对应。
 - 时间属于应用边界：存盘与回收站倒计时用的 Unix 秒由命令层取，再传给 `store`。
 
@@ -85,6 +85,7 @@
 | `move_page_in_volume` | `volumeId: number`、`from: number`、`to: number` | `null`，下标越界夹到边界 |
 | `pages_in_volume` | `volumeId: number` | `number[]` |
 | `volume_of_page` | `page: number` | `number` 或 `null`；页文件不在返回 `null`，在盘上没有归属算 Empty book（编号 0） |
+| `create_page` | `title: string`、`volumeId?: number` | `PageCreatedDto`，页与它落进的册；没给册时同时建出一本同名册 |
 
 ## 书架
 
@@ -95,6 +96,9 @@
 | `save_shelf` | `shelfId: number`、`shelf: ShelfDto` | `null`，只存册的引用 |
 | `create_shelf` | `title: string` | `ShelfSummary`，空书架 |
 | `delete_shelf` | `shelfId: number` | `null`，只删书架文件，册不动 |
+| `shelve_volume` | `shelfId: number`、`volumeId: number` | `null`；一本册只在一层手动书架上，原来在别的架上会挪过来 |
+| `unshelve_volume` | `shelfId: number`、`volumeId: number` | `null`；拿空之后书架进回收站 |
+| `create_shelf_with` | `title: string`、`volumes: number[]` | `ShelfSummary`；有效的册不足两本报 `shelfTooSmall` |
 
 ## 回收站
 
@@ -130,6 +134,7 @@
 | `cannotDeleteEmptyBook` | 删除 Empty book |
 | `badTrash` | 回收站条目名不认识 |
 | `trashTargetExists` | 还原时编号已经被占用 |
+| `shelfTooSmall` | 合成书架时有效的册不足两本 |
 | `badFileName` | 导出文件名非法：空、`.`、`..`、含路径分隔符、含控制字符、以点或空格结尾、Windows 保留名 |
 
 ## 数据形状
@@ -157,6 +162,7 @@
 | `VolumeSummary` | `id`、`title`、`pageCount`、`updatedAt` |
 | `ShelfDto` | `title`、`volumes`（有序册编号） |
 | `ShelfSummary` | `id`、`title`、`volumeCount`、`updatedAt` |
+| `PageCreatedDto` | `board: BoardSummary`、`volume: VolumeSummary` |
 | `TrashItemDto` | `folder`（还原与彻底删除都按它定位）、`kind`（board／volume／shelf）、`id`、`title`、`deletedAt`、`bytes`、`daysLeft`（0 表示已到期） |
 
 `EntryDto.kind` 取 `text`、`image`、`video`、`audio`、`table`、`shape`、`highlight`。`BodyDto` 的 `kind` 取 `text`、`image`、`media`、`table`、`shape`、`highlight`；视频与音频共用 `media` 正文，种类由目录项决定。

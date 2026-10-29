@@ -6,7 +6,7 @@
 
 use std::{fs, path::PathBuf};
 
-use notecevia_core::volume::Shelf;
+use notecevia_core::volume::{MIN_SHELF_VOLUMES, Shelf};
 
 use crate::cbor::{self, Value};
 use crate::error::Error;
@@ -174,6 +174,66 @@ impl Workspace {
         Ok(max.map_or(1, |id| id + 1))
     }
 
+    /// 把一本册放到书架的末尾。一本册只在一层手动书架上：原来在别的架上先摘掉，
+    /// 摘空的那层进回收站。册不存在时什么也不做。
+    pub fn shelve_volume(&self, shelf_id: u64, volume: u64) -> Result<(), Error> {
+        if !self.volume_exists(volume) {
+            return Ok(());
+        }
+        let stamp = now_seconds();
+        let mut shelf = self.load_shelf(shelf_id)?;
+        if shelf.volumes.contains(&volume) {
+            return Ok(());
+        }
+        self.detach_volume_from_shelves(volume, Some(shelf_id), stamp)?;
+        shelf.insert_volume(usize::MAX, volume);
+        self.save_shelf_at(shelf_id, &shelf, stamp)
+    }
+
+    /// 把一本册从书架上拿掉。拿空之后书架进回收站。
+    pub fn unshelve_volume(&self, shelf_id: u64, volume: u64) -> Result<(), Error> {
+        let stamp = now_seconds();
+        let mut shelf = self.load_shelf(shelf_id)?;
+        if !shelf.remove_volume(volume) {
+            return Ok(());
+        }
+        if shelf.volumes.is_empty() {
+            return self.delete_shelf(shelf_id);
+        }
+        self.save_shelf_at(shelf_id, &shelf, stamp)
+    }
+
+    /// 用两本以上的册合成一层书架。不足两本给 [Error::ShelfTooSmall]。
+    /// 这些册原来在别的架上时先摘掉，摘空的架子进回收站。
+    pub fn create_shelf_with(&self, title: String, volumes: Vec<u64>) -> Result<ShelfInfo, Error> {
+        let stamp = now_seconds();
+        let mut held: Vec<u64> = Vec::new();
+        for volume in volumes {
+            if self.volume_exists(volume) && !held.contains(&volume) {
+                held.push(volume);
+            }
+        }
+        if held.len() < MIN_SHELF_VOLUMES {
+            return Err(Error::ShelfTooSmall);
+        }
+        let id = self.next_shelf()?;
+        for volume in &held {
+            self.detach_volume_from_shelves(*volume, None, stamp)?;
+        }
+        let shelf = Shelf {
+            title,
+            volumes: held,
+        };
+        let volume_count = shelf.volumes.len();
+        self.save_shelf_at(id, &shelf, stamp)?;
+        Ok(ShelfInfo {
+            id,
+            title: shelf.title,
+            volume_count,
+            updated_at: stamp,
+        })
+    }
+
     /// 形如 `shelves/<id>.shelf` 的路径。
     pub(crate) fn shelf_path(&self, id: u64) -> PathBuf {
         self.root().join(SHELVES_DIR).join(format!("{id}.{KIND}"))
@@ -204,7 +264,7 @@ impl Workspace {
     }
 
     /// 册文件还在不在。架子上指向已删册的编号按不存在处理。
-    fn volume_exists(&self, volume: u64) -> bool {
+    pub(crate) fn volume_exists(&self, volume: u64) -> bool {
         self.volume_path(volume).is_file()
     }
 }

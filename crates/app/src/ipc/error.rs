@@ -42,6 +42,7 @@ impl From<StoreError> for IpcError {
             StoreError::BadContainer(_) => "badContainer",
             StoreError::NewerFormat { .. } => "newerFormat",
             StoreError::CannotDeleteEmptyBook => "cannotDeleteEmptyBook",
+            StoreError::ShelfTooSmall => "shelfTooSmall",
             StoreError::BadTrashFolder(_) => "badTrash",
             StoreError::TrashTargetExists(_) => "trashTargetExists",
         };
