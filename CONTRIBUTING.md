@@ -39,6 +39,15 @@ cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
 
 ## 发布
 
-推 `v*` 标签触发发布流程：先校验标签、版本与许可证，再在 Linux、Windows、macOS 上构建，生成 SBOM 与构建来源证明，最后创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。平台产物：Windows 生成 msi 与 nsis 安装包，Linux 生成 deb 与 AppImage，macOS 生成 dmg；发布资产另附 `LICENSE`、`NOTICE`、`THIRD_PARTY_LICENSES.md` 与 `SHA256SUMS`。
+版本只有一处：`Cargo.toml` 的 `[workspace.package] version`。`package.json` 的 `version` 跟着一起改；`crates/app/tauri.conf.json` 不写 `version`，安装包版本取自 Cargo，写死会与标签漂移。
 
-发布流程校验标签与 `notecevia` 的版本一致、标签提交在 `main` 上，不一致即失败；产物附 SHA256 校验和、构建来源证明与 SPDX SBOM。发布先创建草稿并上传资产，再转为正式发布；`v*` 标签由 ruleset 保护，不能删除或移动，`release` environment 只允许 `v*` 标签部署。
+`v*` 标签受 ruleset 保护，不能删除也不能移动：标签一旦推上去，版本号就定了，打错只能作废重发。所以推标签之前按顺序做完四步：
+
+1. 改 `Cargo.toml` 与 `package.json` 的 `version`，两处一致。
+2. 写 `changelog/<version>.md`。
+3. 跑三条门禁：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
+4. 在 Actions 里手动触发 `Release`（`workflow_dispatch`，填版本号）干跑一次：只做校验与三平台构建，不产出 Release。绿了再打标签。
+
+推 `v*` 标签触发正式发布：先校验标签与版本一致、标签提交在 `main` 上、三方许可清单没有漂移，再在 Linux、Windows、macOS 上构建，生成 SBOM 与构建来源证明，最后创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。平台产物：Windows 出 NSIS，稳定版本另出 MSI（MSI 的版本段只接受纯数字，带 `-alpha` 之类后缀的版本出不了 MSI），Linux 出 deb 与 AppImage，macOS 出 dmg；发布资产另附 `LICENSE`、`NOTICE`、`THIRD_PARTY_LICENSES.md`、覆盖全部资产的 `SHA256SUMS` 与 SPDX SBOM。
+
+发布先创建草稿并上传资产，再转为正式发布；`release` environment 只允许 `v*` 标签部署。
