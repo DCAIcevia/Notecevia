@@ -28,7 +28,7 @@ import BoardListPane from "../components/BoardListPane.vue";
 }
 
 .blank__lockup {
-  height: 26px;
+  height: 30px;
   margin-bottom: var(--space-3);
   opacity: 0.9;
 }

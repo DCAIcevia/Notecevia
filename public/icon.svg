@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
-  <!-- 从 notecevia.svg 品牌表里裁出的 NC 方章，保持矢量，裁切靠嵌套 svg 的视口。 -->
+  <!-- NC 方章：结构沿用品牌表，填充换成与字标同一组渐变。 -->
+  <defs>
+    <linearGradient id="sunset" x1="504" y1="0" x2="646" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fbb03b"/>
+      <stop offset="1" stop-color="#d4145a"/>
+    </linearGradient>
+  </defs>
   <svg x="0" y="27.03" width="160" height="105.93"
        viewBox="502.0 611.0 145.0 96.0" preserveAspectRatio="xMidYMid meet">
 
@@ -48,4 +54,10 @@
   </g>
 
   </svg>
+  <!-- 覆盖必须放在原样式之后：同特异度时后写的规则生效。 -->
+  <style>
+      .cls-1 { fill: #d4145a }
+      .cls-2 { fill: #fbb03b }
+      .cls-3 { fill: url(#sunset) }
+  </style>
 </svg>
