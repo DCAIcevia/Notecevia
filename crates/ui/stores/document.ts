@@ -107,6 +107,25 @@ export const useDocumentStore = defineStore("document", () => {
     return id;
   }
 
+  /** 媒体块：文件先写进媒体池拿到哈希，再挂进文档。 */
+  function addMediaEntry(
+    kind: BlockKind,
+    geometry: Geometry,
+    media: { hash: string; name: string; bytes: number },
+  ): number {
+    if (!document.value) return 0;
+    const id = nextEntryId();
+    const created: Entry = { id, kind, geometry, z: 0, locked: false, visible: true };
+    const body: Body =
+      kind === "image"
+        ? { kind: "image", id, media: media.hash, name: media.name, fit: "contain" }
+        : { kind: "media", id, media: media.hash, name: media.name, bytes: media.bytes };
+    document.value.entries = [...document.value.entries, created];
+    document.value.bodies = [...document.value.bodies, body];
+    triggerRef(document);
+    return id;
+  }
+
   function removeEntry(id: number): void {
     if (!document.value) return;
     document.value.entries = document.value.entries.filter((item) => item.id !== id);
@@ -231,6 +250,7 @@ export const useDocumentStore = defineStore("document", () => {
     entries,
     entry,
     addEntry,
+    addMediaEntry,
     removeEntry,
     setText,
     setGeometry,

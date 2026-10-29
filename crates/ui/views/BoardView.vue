@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowLeft, Highlighter, Maximize, Minus, Plus, Redo2, Square, Table2, Type, Undo2 } from "@lucide/vue";
+import { ArrowLeft, Highlighter, ImagePlus, Maximize, Minus, Plus, Redo2, Square, Table2, Type, Undo2 } from "@lucide/vue";
+import { api } from "../api/client";
 import BaseButton from "../components/base/BaseButton.vue";
 import type { BlockKind } from "../api/types";
 import CanvasBlock from "../canvas/CanvasBlock.vue";
@@ -17,6 +18,9 @@ const config = useConfigStore();
 const surface = ref<HTMLElement | null>(null);
 const selectedId = ref<number | null>(null);
 const editingId = ref<number | null>(null);
+const picker = ref<HTMLInputElement | null>(null);
+const importing = ref(false);
+const importError = ref<string | null>(null);
 const viewport = useViewport();
 const panning = ref(false);
 
@@ -128,6 +132,54 @@ function createBlock(kind: BlockKind): void {
     editingId.value = id;
   } else {
     doc.endGesture();
+  }
+}
+
+function pickMedia(): void {
+  picker.value?.click();
+}
+
+/** 媒体先写进媒体池换成哈希，再把块挂进文档；一次插入算一步撤销。 */
+async function onFiles(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || !doc.document) return;
+  const kind = file.type.startsWith("image/")
+    ? "image"
+    : file.type.startsWith("video/")
+      ? "video"
+      : file.type.startsWith("audio/")
+        ? "audio"
+        : null;
+  if (!kind) {
+    importError.value = "只认图片、视频与音频";
+    return;
+  }
+
+  importing.value = true;
+  importError.value = null;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const hash = await api.writeMedia(file.name, Array.from(bytes));
+    const element = surface.value;
+    const width = kind === "image" ? 320 : 360;
+    const height = kind === "image" ? 240 : 200;
+    const centerX = element ? (element.clientWidth / 2 - viewport.x.value) / viewport.scale.value : 0;
+    const centerY = element ? (element.clientHeight / 2 - viewport.y.value) / viewport.scale.value : 0;
+
+    doc.beginGesture();
+    const id = doc.addMediaEntry(
+      kind,
+      { x: centerX - width / 2, y: centerY - height / 2, width, height, rotation: 0 },
+      { hash, name: file.name, bytes: bytes.byteLength },
+    );
+    doc.endGesture();
+    selectedId.value = id;
+  } catch (error) {
+    importError.value = (error as { message?: string }).message ?? "导入失败";
+  } finally {
+    importing.value = false;
   }
 }
 
@@ -326,7 +378,8 @@ onBeforeUnmount(() => {
       </button>
       <h1 class="board__title">{{ doc.document?.board.title ?? "画板" }}</h1>
 
-      <span v-if="doc.status === 'failed'" class="board__error">{{ doc.saveError?.message }}</span>
+      <span v-if="importError" class="board__error">{{ importError }}</span>
+      <span v-else-if="doc.status === 'failed'" class="board__error">{{ doc.saveError?.message }}</span>
       <span class="board__status" :class="{ 'board__status--failed': doc.status === 'failed' }">
         {{ statusLabel }}
       </span>
@@ -391,6 +444,16 @@ onBeforeUnmount(() => {
         <button class="chip" type="button" aria-label="新建高亮" @click="createBlock('highlight')">
           <Highlighter :size="15" :stroke-width="1.75" />
         </button>
+        <button class="chip" type="button" :disabled="importing" aria-label="插入媒体" @click="pickMedia">
+          <ImagePlus :size="15" :stroke-width="1.75" />
+        </button>
+        <input
+          ref="picker"
+          class="board__picker"
+          type="file"
+          accept="image/*,video/*,audio/*"
+          @change="onFiles"
+        />
       </div>
 
       <div class="board__zoom">
@@ -516,6 +579,10 @@ onBeforeUnmount(() => {
 .board__actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.board__picker {
+  display: none;
 }
 
 .board__tools {

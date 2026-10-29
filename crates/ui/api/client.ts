@@ -58,4 +58,5 @@ export const api = {
   saveBoard: (boardId: number, document: DocumentDto) =>
     call<SaveResult>("save_board", { boardId, document }),
   readMedia: (hash: string) => call<ArrayBuffer>("read_media", { hash }),
+  writeMedia: (name: string, data: number[]) => call<string>("write_media", { name, data }),
 };
