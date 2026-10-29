@@ -13,7 +13,7 @@ const loading = ref(true);
 const failure = ref<string | null>(null);
 
 const kindLabel: Record<TrashItem["kind"], string> = {
-  board: "画板",
+  board: "笔记",
   volume: "册",
   shelf: "书架",
 };
@@ -76,7 +76,7 @@ async function empty(): Promise<void> {
 
     <div v-if="loading" class="trash__state"><BaseSpinner /></div>
 
-    <BaseEmptyState v-else-if="items.length === 0" title="回收站是空的" hint="删掉的画板、册与书架会先到这里。" />
+    <BaseEmptyState v-else-if="items.length === 0" title="回收站是空的" hint="删掉的笔记、册与书架会先到这里。" />
 
     <ul v-else class="trash__list">
       <li v-for="item in items" :key="item.folder" class="item list-item">

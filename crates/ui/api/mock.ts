@@ -93,7 +93,7 @@ export async function mockInvoke(command: string, args?: Record<string, unknown>
     case "open_board":
       return sampleDocument();
     case "create_board":
-      return { id: 99, title: String(args?.title ?? "未命名画板"), tags: [], updatedAt: 1_761_800_000, entryCount: 0 };
+      return { id: 99, title: String(args?.title ?? "未命名笔记"), tags: [], updatedAt: 1_761_800_000, entryCount: 0 };
     case "read_thumbnail":
       return new ArrayBuffer(0);
     case "save_thumbnail":

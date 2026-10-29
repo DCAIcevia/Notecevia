@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 画板列表：左边那一栏。搜索、新建、改名、删除都在这里，
+// 笔记列表：左边那一栏。搜索、新建、改名、删除都在这里，
 // 选中哪张由路由决定，列表本身不持有选中态。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -88,7 +88,7 @@ function formatTime(seconds: number): string {
 async function createBoard(): Promise<void> {
   creating.value = true;
   try {
-    const board = await api.createBoard("未命名画板");
+    const board = await api.createBoard("未命名笔记");
     await workspace.refreshBoards();
     router.push({ name: "board", params: { id: board.id } });
   } finally {
@@ -159,8 +159,8 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
 <template>
   <div class="pane">
     <div class="pane__head">
-      <BaseSearchField class="pane__search" placeholder="搜索画板" @search="runSearch" />
-      <button class="pane__new" type="button" :disabled="creating" aria-label="新建画板" @click="createBoard">
+      <BaseSearchField class="pane__search" placeholder="搜索笔记" @search="runSearch" />
+      <button class="pane__new" type="button" :disabled="creating" aria-label="新建笔记" @click="createBoard">
         ＋
       </button>
     </div>
@@ -184,7 +184,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
       <template v-else-if="showingHits">
         <p v-if="searchError" class="pane__error">{{ searchError }}</p>
         <p v-else-if="searching" class="pane__hint">正在搜索</p>
-        <p v-else-if="hits.length === 0" class="pane__hint">没有命中的画板</p>
+        <p v-else-if="hits.length === 0" class="pane__hint">没有命中的笔记</p>
         <RouterLink
           v-for="hit in hits"
           :key="hit.boardId"
@@ -196,14 +196,14 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
         </RouterLink>
       </template>
 
-      <p v-else-if="workspace.boards.length === 0" class="pane__hint">还没有画板，点右上角新建。</p>
+      <p v-else-if="workspace.boards.length === 0" class="pane__hint">还没有笔记，点右上角新建。</p>
 
       <template v-else>
         <BaseTextField
           v-if="renamingId !== null"
           v-model="renamingTitle"
           class="pane__rename"
-          placeholder="画板名"
+          placeholder="笔记名"
           @keydown.enter.prevent="commitRename(workspace.boards.find((b) => b.id === renamingId)!)"
           @keydown.esc.prevent="cancelRename"
           @blur="commitRename(workspace.boards.find((b) => b.id === renamingId)!)"
@@ -227,7 +227,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
             <button
               class="row__action"
               type="button"
-              aria-label="重命名画板"
+              aria-label="重命名笔记"
               title="重命名"
               @click="beginRename(board, $event)"
             >
@@ -236,7 +236,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
             <button
               class="row__action row__action--danger"
               type="button"
-              aria-label="删除画板"
+              aria-label="删除笔记"
               title="删除"
               @click="removeBoard(board, $event)"
             >

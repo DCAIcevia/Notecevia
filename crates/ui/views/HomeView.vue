@@ -11,8 +11,8 @@ import BoardListPane from "../components/BoardListPane.vue";
 
     <div class="blank">
       <img class="blank__lockup" src="/lockup.svg" alt="Notecevia" />
-      <p class="blank__title">还没有打开画板</p>
-      <p class="blank__hint">从左边挑一张，或者新建一张。</p>
+      <p class="blank__title">还没有打开笔记</p>
+      <p class="blank__hint">从左边挑一条，或者新建一条。</p>
     </div>
   </AppShell>
 </template>

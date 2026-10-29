@@ -83,8 +83,8 @@ async function move(from: number, to: number): Promise<void> {
 
     <template v-else-if="volume">
       <div class="volume__bind">
-        <select v-model="candidate" class="volume__select" aria-label="选择要装订的画板">
-          <option :value="null">选择一张画板</option>
+        <select v-model="candidate" class="volume__select" aria-label="选择要装订的笔记">
+          <option :value="null">选择一篇笔记</option>
           <option
             v-for="board in workspace.boards"
             :key="board.id"
@@ -100,14 +100,14 @@ async function move(from: number, to: number): Promise<void> {
       <BaseEmptyState
         v-if="volume.pages.length === 0"
         title="这本册还是空的"
-        hint="从上面选一张画板装订进来。"
+        hint="从上面选一篇笔记装订进来。"
       />
 
       <ol v-else class="volume__list">
         <li v-for="(page, index) in volume.pages" :key="page" class="item">
           <span class="item__index">{{ index + 1 }}</span>
           <button class="row" type="button" @click="router.push({ name: 'board', params: { id: page } })">
-            <span class="row__title">{{ titles.get(page) ?? `画板 ${page}` }}</span>
+            <span class="row__title">{{ titles.get(page) ?? `笔记 ${page}` }}</span>
           </button>
           <span class="item__actions">
             <button class="item__action" type="button" :disabled="index === 0" @click="move(index, index - 1)">

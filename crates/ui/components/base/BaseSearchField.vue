@@ -68,6 +68,10 @@ onBeforeUnmount(() => window.clearTimeout(timer));
   flex: none;
 }
 
+.search__input:focus-visible {
+  outline: none;
+}
+
 .search__input {
   flex: 1;
   min-width: 0;
@@ -85,7 +89,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
 /* 输入框的 :focus-visible 对文字输入永远成立，画环就等于“一直亮着”。
    焦点提示改成只把边框换成本身已有的颜色，不加环、不改几何。 */
 .search:focus-within {
-  border-color: var(--color-accent);
+  border-color: var(--color-line-active);
 }
 
 .search__clear {

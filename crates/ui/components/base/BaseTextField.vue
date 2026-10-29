@@ -48,6 +48,11 @@ const model = defineModel<string>({ default: "" });
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
+.field__input:focus-visible {
+  outline: none;
+  border-color: var(--color-line-active);
+}
+
 .field__input::placeholder {
   color: var(--color-text-muted);
 }

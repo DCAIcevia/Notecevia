@@ -90,7 +90,7 @@ function fitToView(): void {
 }
 
 async function boot(): Promise<void> {
-  // 配置与打开画板互不依赖：并行跑，打开不等配置。
+  // 配置与打开笔记互不依赖：并行跑，打开不等配置。
   const configReady = config.snapshot ? Promise.resolve() : config.load();
   await doc.open(boardId.value);
   await nextTick();
@@ -472,14 +472,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AppShell>
+  <AppShell bare>
     <template #list>
       <BoardListPane />
     </template>
 
     <div class="board">
     <header class="board__bar island">
-      <h1 class="board__title">{{ doc.document?.board.title ?? "画板" }}</h1>
+      <h1 class="board__title">{{ doc.document?.board.title ?? "笔记" }}</h1>
 
       <span v-if="exportedPath" class="board__status board__status--ok">已导出 {{ exportedPath }}</span>
       <span v-if="importError" class="board__error">{{ importError }}</span>
@@ -527,7 +527,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div v-if="doc.loading" class="board__overlay"><span class="board__note">正在打开画板</span></div>
+      <div v-if="doc.loading" class="board__overlay"><span class="board__note">正在打开笔记</span></div>
 
       <div v-else-if="doc.loadError" class="board__overlay board__overlay--error">
         <p class="board__error">{{ doc.loadError.message }}</p>
@@ -538,7 +538,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else-if="blocks.length === 0" class="board__overlay">
-        <span class="board__note">这张画板还没有内容</span>
+        <span class="board__note">这篇笔记还没有内容</span>
       </div>
 
       <div v-if="editingId === null" class="board__tools">

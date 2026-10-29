@@ -6,10 +6,11 @@ import { BookOpen, Grid, Trash } from "../icons";
 import TitleBar from "./TitleBar.vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+const props = withDefaults(defineProps<{ bare?: boolean }>(), { bare: false });
 const route = useRoute();
 
 const primary = [
-  { name: "home", label: "画板", icon: Grid },
+  { name: "home", label: "笔记", icon: Grid },
   { name: "library", label: "册与书架", icon: BookOpen },
 ] as const;
 
@@ -68,7 +69,7 @@ function isActive(name: string): boolean {
       <slot name="list" />
     </aside>
 
-    <section class="shell__main island">
+    <section class="shell__main" :class="{ island: !props.bare }">
       <slot />
       </section>
     </main>
@@ -221,5 +222,12 @@ function isActive(name: string): boolean {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+}
+
+/* bare 模式留给画布页：画布自己就是一块岛，外面不能再套一层白底，
+   否则岛与岛之间的缝会被这层白填掉，看起来就只剩一块。 */
+.shell__main:not(.island) {
+  background: none;
+  box-shadow: none;
 }
 </style>

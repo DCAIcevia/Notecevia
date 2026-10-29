@@ -22,6 +22,8 @@
   /* 线：只有两档，不需要边框的地方不画 */
   --color-line: #e5e5e2;
   --color-line-strong: #d0d0cb;
+  /* 聚焦时把线加深一档，不加环、不换色系 */
+  --color-line-active: #b5b5ae;
 
   /* 语义：只留强调与危险，警告与成功等到有使用方再加 */
   --color-accent: #3466c9;

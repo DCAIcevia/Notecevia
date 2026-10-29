@@ -31,7 +31,7 @@ const saved = ref(35);
 
     <section class="preview__section">
       <h2 class="preview__heading">文字</h2>
-      <p class="preview__lg">标题字。用于画板标题、册名。</p>
+      <p class="preview__lg">标题字。用于笔记标题、册名。</p>
       <p>正文。列表行、块内文字。</p>
       <p class="preview__muted">次要文字。时间、条数、路径。</p>
       <p class="preview__disabled">禁用文字。</p>
@@ -81,7 +81,7 @@ const saved = ref(35);
     <section class="preview__section">
       <h2 class="preview__heading">按钮</h2>
       <div class="preview__row">
-        <BaseButton variant="primary">新建画板</BaseButton>
+        <BaseButton variant="primary">新建笔记</BaseButton>
         <BaseButton>取消</BaseButton>
         <BaseButton variant="ghost">更多</BaseButton>
         <BaseButton variant="danger">删除</BaseButton>
@@ -96,7 +96,7 @@ const saved = ref(35);
     <section class="preview__section">
       <h2 class="preview__heading">输入</h2>
       <div class="preview__row preview__row--baseline">
-        <BaseTextField v-model="title" placeholder="画板标题" />
+        <BaseTextField v-model="title" placeholder="笔记标题" />
         <BaseSearchField v-model="query" @search="lastSearch = $event || '清空了'" />
       </div>
       <p class="preview__note">搜索停手 250ms 才发查询：{{ lastSearch }}</p>
@@ -120,7 +120,7 @@ const saved = ref(35);
         <BaseProgress :value="saved" label="保存进度" />
         <BaseProgress label="正在重建索引" />
         <p class="preview__note">已保存 {{ saved }}%</p>
-        <p class="preview__note"><BaseSpinner /> 正在读取画板</p>
+        <p class="preview__note"><BaseSpinner /> 正在读取笔记</p>
         <div class="preview__row">
           <BaseButton size="sm" @click="saved = Math.max(0, saved - 20)">退一步</BaseButton>
           <BaseButton size="sm" @click="saved = Math.min(100, saved + 20)">进一步</BaseButton>
@@ -130,9 +130,9 @@ const saved = ref(35);
 
     <section class="preview__section">
       <h2 class="preview__heading">空态</h2>
-      <BaseEmptyState title="还没有画板" hint="画板是笔记的容器，先建一张。">
+      <BaseEmptyState title="还没有笔记" hint="笔记是内容的容器，先建一条。">
         <template #action>
-          <BaseButton variant="primary">新建画板</BaseButton>
+          <BaseButton variant="primary">新建笔记</BaseButton>
         </template>
       </BaseEmptyState>
     </section>
