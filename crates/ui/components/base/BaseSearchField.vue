@@ -82,8 +82,9 @@ onBeforeUnmount(() => window.clearTimeout(timer));
   color: var(--color-text-muted);
 }
 
-/* 输入框自己的焦点样式由外层描边承担，这里不再画第二层 */
-.search:focus-within {
+/* 只有键盘焦点才画环：鼠标点进来不画，免得看起来像被选中。
+   `:has(:focus-visible)` 让焦点提示保留给 Tab 用户。 */
+.search:has(.search__input:focus-visible) {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }

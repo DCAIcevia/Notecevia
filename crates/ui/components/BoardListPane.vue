@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 import BaseSearchField from "./base/BaseSearchField.vue";
 import BaseSpinner from "./base/BaseSpinner.vue";
 import BaseTextField from "./base/BaseTextField.vue";
+import { Pencil, Trash } from "../icons";
 import { api } from "../api/client";
 import type { BoardSummary, SearchHit } from "../api/types";
 import { useWorkspaceStore } from "../stores/workspace";
@@ -223,9 +224,23 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
             <span class="row__meta">{{ board.entryCount }} 块 · {{ formatTime(board.updatedAt) }}</span>
           </span>
           <span class="row__actions">
-            <button class="row__action" type="button" aria-label="改名" @click="beginRename(board, $event)">改</button>
-            <button class="row__action row__action--danger" type="button" aria-label="删除" @click="removeBoard(board, $event)">
-              删
+            <button
+              class="row__action"
+              type="button"
+              aria-label="重命名画板"
+              title="重命名"
+              @click="beginRename(board, $event)"
+            >
+              <Pencil :size="13" :stroke-width="1.75" />
+            </button>
+            <button
+              class="row__action row__action--danger"
+              type="button"
+              aria-label="删除画板"
+              title="删除"
+              @click="removeBoard(board, $event)"
+            >
+              <Trash :size="13" :stroke-width="1.75" />
             </button>
           </span>
         </RouterLink>

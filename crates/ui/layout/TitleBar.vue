@@ -8,8 +8,7 @@ const shell = useShellStore();
 
 <template>
   <header v-if="shell.mode !== 'native'" class="titlebar" data-tauri-drag-region>
-    <img class="titlebar__mark" src="/icon.svg" alt="" width="18" height="18" />
-    <span class="titlebar__brand" data-tauri-drag-region>Notecevia</span>
+    <img class="titlebar__lockup" src="/lockup.svg" alt="Notecevia" data-tauri-drag-region />
     <span class="titlebar__drag" data-tauri-drag-region />
   </header>
 </template>
@@ -26,18 +25,9 @@ const shell = useShellStore();
   -webkit-user-select: none;
 }
 
-.titlebar__mark {
+.titlebar__lockup {
   flex: none;
-  width: 18px;
-  height: 18px;
-  margin-right: var(--space-2);
-}
-
-.titlebar__brand {
-  font-size: var(--text-base);
-  font-weight: 500;
-  color: var(--color-text);
-  letter-spacing: 0.01em;
+  height: 20px;
   pointer-events: auto;
 }
 
