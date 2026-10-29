@@ -5,14 +5,14 @@ import { router } from "./router";
 import { useConfigStore } from "./stores/config";
 import "./theme/default.css";
 import "./theme/base.css";
+import "./layout/frame.css";
 
 const pinia = createPinia();
 createApp(App).use(pinia).use(router).mount("#app");
 
-// 开发期在左下角显示启动耗时，录屏或截图都能直接读到：
-// 脚本执行到挂载用了多久、列表真正出来又用了多久。
-if (import.meta.env.DEV) {
-  const boot = (window as unknown as { __BOOT_AT?: number }).__BOOT_AT ?? 0;
+// 开发期排查启动用：地址带 ?debug 时在左下角显示耗时。
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("debug")) {
+  const boot = performance.now();
   const mounted = performance.now();
   const badge = document.createElement("div");
   badge.style.cssText =

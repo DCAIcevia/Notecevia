@@ -1,0 +1,50 @@
+/* 岛屿化布局：窗口是一块底，内容放在一两块浮起的岛上。
+   规则只有几条：内缩固定、岛之间留缝、圆角统一、阴影用最轻的一档。 */
+
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-3);
+  background: var(--color-surface-app);
+}
+
+.island {
+  background: var(--color-surface-content);
+  /* 岛用最大一档圆角，岛内控件仍是 6，形成同心内缩 */
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-hairline);
+}
+
+/* 占据剩余高度的岛（列表、画布） */
+.island--fill {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 岛内内容的左右留白，跟岛的圆角同心 */
+.island__inset {
+  padding: var(--space-4) var(--space-6);
+}
+
+/* 内容页：一列居中的岛，宽度固定，窗口再宽也不拉长行宽 */
+.app-frame--column {
+  align-items: center;
+}
+
+.app-frame--column > * {
+  width: min(100%, 820px);
+}
+
+/* 画板页：岛铺满，画布需要全部空间 */
+.island__center {
+  max-width: 760px;
+  margin: 0 auto;
+}
+/* 列表：行与行之间一条细线，不画整块卡片；悬停只提升底色 */
+.list-item + .list-item,
+.item + .item {
+  border-top: 1px solid var(--color-line);
+}

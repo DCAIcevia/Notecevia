@@ -471,8 +471,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="board">
-    <header class="board__bar">
+  <main class="app-frame">
+    <header class="board__bar island">
       <button class="board__back" type="button" aria-label="返回画板列表" @click="router.push({ name: 'home' })">
         <ArrowLeft :size="16" :stroke-width="1.75" />
       </button>
@@ -580,20 +580,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.board {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--color-surface-content);
-}
-
 .board__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-line);
-  background: var(--color-surface-content);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .board__back {
@@ -650,10 +642,15 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/* 画布是一块铺满的岛：自己承担白底、圆角与最轻的阴影 */
 .board__surface {
   position: relative;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-content);
+  box-shadow: var(--shadow-hairline);
   cursor: grab;
   touch-action: none;
 }

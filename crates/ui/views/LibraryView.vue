@@ -60,11 +60,13 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
 </script>
 
 <template>
-  <main class="library">
-    <header class="library__bar">
+  <main class="app-frame app-frame--column">
+    <header class="library__bar island">
       <button class="library__back" type="button" @click="router.push({ name: 'home' })">← 画板</button>
       <h1 class="library__title">册与书架</h1>
     </header>
+    <section class="island island--fill">
+      <div class="island__inset">
 
     <p v-if="failure" class="library__error">{{ failure }}</p>
 
@@ -77,7 +79,7 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
           <BaseButton size="sm" @click="createVolume">新建册</BaseButton>
         </div>
         <ul class="library__list">
-          <li v-for="volume in volumes" :key="volume.id" class="item">
+          <li v-for="volume in volumes" :key="volume.id" class="item list-item">
             <button class="row" type="button" @click="router.push({ name: 'volume', params: { id: volume.id } })">
               <span class="row__title">{{ volume.title }}</span>
               <span class="row__meta">{{ volume.pageCount }} 页</span>
@@ -103,7 +105,7 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
         </div>
         <BaseEmptyState v-if="shelves.length === 0" title="还没有书架" hint="书架用来分门别类地放册。" />
         <ul v-else class="library__list">
-          <li v-for="shelf in shelves" :key="shelf.id" class="item">
+          <li v-for="shelf in shelves" :key="shelf.id" class="item list-item">
             <button class="row" type="button" @click="router.push({ name: 'shelf', params: { id: shelf.id } })">
               <span class="row__title">{{ shelf.title }}</span>
               <span class="row__meta">{{ shelf.volumeCount }} 册</span>
@@ -117,23 +119,18 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
         </ul>
       </section>
     </template>
+        </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
-.library {
-  height: 100%;
-  overflow: auto;
-  padding: var(--space-6) var(--space-8);
-  background: var(--color-surface-app);
-}
-
 .library__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-3);
-  max-width: 760px;
-  margin: 0 auto var(--space-4);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .library__back,
@@ -194,7 +191,6 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
 .library__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -209,6 +205,8 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
 .row {
   display: flex;
   flex: 1;
+  /* 文字与上方标题对齐：悬停底色向两侧多出一格 */
+  margin-inline: calc(-1 * var(--space-3));
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
@@ -216,8 +214,7 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
   padding: var(--space-3);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-surface-content);
-  box-shadow: var(--shadow-hairline);
+  background: none;
   text-align: left;
   cursor: pointer;
 }

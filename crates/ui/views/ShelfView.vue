@@ -54,11 +54,13 @@ function remove(volumeId: number): void {
 </script>
 
 <template>
-  <main class="shelf">
-    <header class="shelf__bar">
+  <main class="app-frame app-frame--column">
+    <header class="shelf__bar island">
       <button class="shelf__back" type="button" @click="router.push({ name: 'library' })">← 册与书架</button>
       <h1 class="shelf__title">{{ shelf?.title ?? "书架" }}</h1>
     </header>
+    <section class="island island--fill">
+      <div class="island__inset">
 
     <p v-if="failure" class="shelf__error">{{ failure }}</p>
 
@@ -69,7 +71,7 @@ function remove(volumeId: number): void {
         <h2 class="shelf__heading">架上的册</h2>
         <p v-if="shelf.volumes.length === 0" class="shelf__hint">这一层还空着，从下面加册。</p>
         <ul class="shelf__list">
-          <li v-for="volumeId in shelf.volumes" :key="volumeId" class="item">
+          <li v-for="volumeId in shelf.volumes" :key="volumeId" class="item list-item">
             <button class="row" type="button" @click="router.push({ name: 'volume', params: { id: volumeId } })">
               <span class="row__title">{{ titles.get(volumeId) ?? `册 ${volumeId}` }}</span>
             </button>
@@ -99,23 +101,18 @@ function remove(volumeId: number): void {
         </ul>
       </section>
     </template>
+        </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
-.shelf {
-  height: 100%;
-  overflow: auto;
-  padding: var(--space-6) var(--space-8);
-  background: var(--color-surface-app);
-}
-
 .shelf__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-3);
-  max-width: 760px;
-  margin: 0 auto var(--space-4);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .shelf__back {
@@ -171,7 +168,6 @@ function remove(volumeId: number): void {
 .shelf__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -186,6 +182,8 @@ function remove(volumeId: number): void {
 .row {
   display: flex;
   flex: 1;
+  /* 文字与上方标题对齐：悬停底色向两侧多出一格 */
+  margin-inline: calc(-1 * var(--space-3));
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
@@ -193,8 +191,7 @@ function remove(volumeId: number): void {
   padding: var(--space-3);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-surface-content);
-  box-shadow: var(--shadow-hairline);
+  background: none;
   text-align: left;
   cursor: pointer;
 }

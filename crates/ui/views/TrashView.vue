@@ -65,12 +65,14 @@ async function empty(): Promise<void> {
 </script>
 
 <template>
-  <main class="trash">
-    <header class="trash__bar">
+  <main class="app-frame app-frame--column">
+    <header class="trash__bar island">
       <button class="trash__back" type="button" @click="router.push({ name: 'home' })">← 画板</button>
       <h1 class="trash__title">回收站</h1>
       <BaseButton v-if="items.length > 0" size="sm" @click="empty">清空</BaseButton>
     </header>
+    <section class="island island--fill">
+      <div class="island__inset">
 
     <p v-if="failure" class="trash__error">{{ failure }}</p>
     <p class="trash__hint">删掉的东西在这里放 30 天，到期自动清掉。</p>
@@ -80,7 +82,7 @@ async function empty(): Promise<void> {
     <BaseEmptyState v-else-if="items.length === 0" title="回收站是空的" hint="删掉的画板、册与书架会先到这里。" />
 
     <ul v-else class="trash__list">
-      <li v-for="item in items" :key="item.folder" class="item">
+      <li v-for="item in items" :key="item.folder" class="item list-item">
         <div class="row row--static">
           <span class="row__title">{{ item.title }}</span>
           <span class="row__meta">
@@ -94,23 +96,18 @@ async function empty(): Promise<void> {
         </span>
       </li>
     </ul>
+        </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
-.trash {
-  height: 100%;
-  overflow: auto;
-  padding: var(--space-6) var(--space-8);
-  background: var(--color-surface-app);
-}
-
 .trash__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-3);
-  max-width: 760px;
-  margin: 0 auto var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .trash__back {
@@ -172,14 +169,15 @@ async function empty(): Promise<void> {
 .row {
   display: flex;
   flex: 1;
+  /* 文字与上方标题对齐：悬停底色向两侧多出一格 */
+  margin-inline: calc(-1 * var(--space-3));
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
   min-width: 0;
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  background: var(--color-surface-content);
-  box-shadow: var(--shadow-hairline);
+  background: none;
 }
 
 .row__title {

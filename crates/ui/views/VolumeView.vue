@@ -69,11 +69,13 @@ async function move(from: number, to: number): Promise<void> {
 </script>
 
 <template>
-  <main class="volume">
-    <header class="volume__bar">
+  <main class="app-frame app-frame--column">
+    <header class="volume__bar island">
       <button class="volume__back" type="button" @click="router.push({ name: 'library' })">← 册与书架</button>
       <h1 class="volume__title">{{ volume?.title ?? "册" }}</h1>
     </header>
+    <section class="island island--fill">
+      <div class="island__inset">
 
     <p v-if="failure" class="volume__error">{{ failure }}</p>
 
@@ -124,23 +126,18 @@ async function move(from: number, to: number): Promise<void> {
         </li>
       </ol>
     </template>
+        </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
-.volume {
-  height: 100%;
-  overflow: auto;
-  padding: var(--space-6) var(--space-8);
-  background: var(--color-surface-app);
-}
-
 .volume__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-3);
-  max-width: 760px;
-  margin: 0 auto var(--space-4);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .volume__back {
@@ -220,13 +217,14 @@ async function move(from: number, to: number): Promise<void> {
 .row {
   display: flex;
   flex: 1;
+  /* 文字与上方标题对齐：悬停底色向两侧多出一格 */
+  margin-inline: calc(-1 * var(--space-3));
   align-items: center;
   min-width: 0;
   padding: var(--space-3);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-surface-content);
-  box-shadow: var(--shadow-hairline);
+  background: none;
   text-align: left;
   cursor: pointer;
 }

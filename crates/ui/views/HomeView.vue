@@ -168,8 +168,8 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 </script>
 
 <template>
-  <main class="home">
-    <header class="home__bar">
+  <main class="app-frame app-frame--column">
+    <header class="home__bar island">
       <h1 class="home__title">画板</h1>
       <BaseSearchField class="home__search" placeholder="搜索画板" @search="runSearch" />
       <BaseButton :disabled="creating" @click="createBoard">新建画板</BaseButton>
@@ -180,7 +180,9 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 
     <p v-if="actionError" class="home__error">{{ actionError }}</p>
 
-    <div v-if="bootError" class="home__state">
+    <section class="island island--fill">
+      <div class="island__inset">
+        <div v-if="bootError" class="home__state">
       <p class="home__error">{{ bootError }}</p>
       <BaseButton size="sm" @click="boot">重试</BaseButton>
     </div>
@@ -200,7 +202,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
       <p v-else-if="hits.length === 0" class="home__hint">没有命中的画板</p>
 
       <ul class="home__list">
-        <li v-for="hit in hits" :key="hit.boardId">
+        <li v-for="hit in hits" :key="hit.boardId" class="list-item">
           <button class="row" type="button" @click="openBoard(hit.boardId)">
             <span class="row__title">{{ hit.title }}</span>
             <span class="row__snippet">{{ hit.snippet }}</span>
@@ -220,7 +222,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
     </BaseEmptyState>
 
     <ul v-else class="home__list">
-      <li v-for="board in workspace.boards" :key="board.id" class="item">
+      <li v-for="board in workspace.boards" :key="board.id" class="item list-item">
         <BaseTextField
           v-if="renamingId === board.id"
           v-model="renamingTitle"
@@ -248,23 +250,18 @@ async function removeBoard(board: BoardSummary): Promise<void> {
         </template>
       </li>
     </ul>
+      </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
-.home {
-  height: 100%;
-  overflow: auto;
-  padding: var(--space-6) var(--space-8);
-  background: var(--color-surface-app);
-}
-
 .home__bar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-3);
-  max-width: 760px;
-  margin: 0 auto var(--space-4);
+  padding: var(--space-2) var(--space-3);
 }
 
 .home__title {
@@ -303,14 +300,13 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 }
 
 .home__error {
-  max-width: 760px;
-  margin: 0 auto var(--space-2);
+  flex: none;
+  padding: 0 var(--space-3);
   color: var(--color-danger);
 }
 
 .home__hint {
-  max-width: 760px;
-  margin: 0 auto var(--space-2);
+  margin-bottom: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
@@ -318,9 +314,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 .home__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-width: 760px;
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -334,6 +328,8 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 .row {
   display: flex;
   flex: 1;
+  /* 文字与上方标题对齐：悬停底色向两侧多出一格 */
+  margin-inline: calc(-1 * var(--space-3));
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
@@ -341,8 +337,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
   padding: var(--space-3);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-surface-content);
-  box-shadow: var(--shadow-hairline);
+  background: none;
   text-align: left;
   cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-standard);
