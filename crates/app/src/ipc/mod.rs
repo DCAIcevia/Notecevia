@@ -9,6 +9,7 @@ pub mod boards;
 pub mod config;
 pub mod dto;
 pub mod error;
+pub mod health;
 pub mod library;
 pub mod media;
 pub mod state;

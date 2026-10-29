@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod ipc;
+pub mod watchdog;
 
 use ipc::AppState;
 
@@ -13,7 +14,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
+        .manage(watchdog::Heartbeat::new())
+        .setup(|app| {
+            // 前端脚本挂死时窗口要能自己关掉：六十秒没有心跳就退出。
+            watchdog::spawn(app.handle().clone(), std::time::Duration::from_secs(60));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            ipc::health::heartbeat,
             ipc::config::app_config,
             ipc::config::save_app_config,
             ipc::state::app_info,

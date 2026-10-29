@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App.vue";
 import { router } from "./router";
 import { useConfigStore } from "./stores/config";
@@ -30,3 +31,14 @@ if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("debu
 
 // 配置读不到不挡界面，缺省值照常工作。
 void useConfigStore(pinia).load();
+
+// 界面心跳：脚本挂死时窗口壳会在六十秒后自行退出，不会留下一块关不掉的白板。
+if ("__TAURI_INTERNALS__" in window) {
+  const beat = () => {
+    void invoke("heartbeat").catch(() => {
+      // 命令失败不影响界面。
+    });
+  };
+  beat();
+  window.setInterval(beat, 3000);
+}
