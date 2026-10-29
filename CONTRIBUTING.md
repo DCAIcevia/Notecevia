@@ -43,8 +43,8 @@ cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
 
 `v*` 标签受 ruleset 保护，不能删除也不能移动：标签一旦推上去，版本号就定了，打错只能作废重发。所以推标签之前按顺序做完四步：
 
-1. 改 `Cargo.toml` 与 `package.json` 的 `version`，两处一致。
-2. 写 `changelog/<version>.md`。
+1. `pnpm release:bump <version>`：改 `Cargo.toml` 的 `[workspace.package] version` 与 `package.json` 的 `version`，用 `cargo update -w` 把 `Cargo.lock` 里的 workspace 版本一起带上，并按下面的格式建好 `changelog/<version>.md` 模板。版本号只接受显式 semver，脚本不替你猜下一个号。
+2. 填 `changelog/<version>.md`（第 1 步只建了模板）。
 3. 跑三条门禁：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
 4. 在 Actions 里手动触发 `Release`（`workflow_dispatch`，填版本号）干跑一次：只做校验与三平台构建，不产出 Release。绿了再打标签。
 
