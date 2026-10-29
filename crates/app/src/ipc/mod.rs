@@ -6,8 +6,11 @@
 //! 时间属于应用边界：存盘、回收站倒计时都在这里取 Unix 秒，内核与 `store` 各自管自己的时钟。
 
 pub mod boards;
+pub mod config;
+pub mod decoration;
 pub mod dto;
 pub mod error;
+pub mod health;
 pub mod library;
 pub mod media;
 pub mod state;

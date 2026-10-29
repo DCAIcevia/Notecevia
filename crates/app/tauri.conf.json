@@ -4,14 +4,19 @@
   "identifier": "com.hanyang06.notecevia",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Notecevia",
+        "decorations": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "width": 1120,
         "height": 720,
         "minWidth": 720,

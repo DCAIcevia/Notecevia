@@ -11,15 +11,21 @@
 
 依赖方向单向：`core` ← `store`、`core` ← `crates/app`、`store` ← `crates/app`；`crates/app` 以路径依赖引用 `core`、`store`，另依赖 `tauri` 与 `tauri-plugin-opener`。
 
-前端经 Tauri 命令调用窗口壳；命令契约见 `docs/design/ipc.md`，`greet` 是遗留示例命令，前端界面尚未接上。
+前端经 Tauri 命令调用窗口壳；命令契约见 `docs/design/ipc.md`，前端界面刚起外壳，命令尚未接上。
 
 以下加载、保存与交互规则描述目标行为；其中自动保存、缩略图生成与索引刷新由界面层驱动，新界面尚未实现。
 
 ## 状态在哪
 
-- 文档模型是 `core::Document`，撤销历史是 `core::History`：内存里的整份文档快照，栈最多 100 步；一次手势算一步。
+- 文档模型是 `core::Document`；新界面把整份文档留在前端，撤销也存快照，栈最多 100 步，一次手势算一步（`crates/ui/stores/document.ts`）。
 - 脏标记由「当前文档与上次保存的快照」比较得出，撤销回到保存点时自动变干净。
 - `store::Workspace` 里带一份索引缓存（`RefCell`），所以不是 `Sync`。
+
+## 应用配置
+
+- 应用配置放程序的配置目录，不随工作区走：换工作区不换策略，工作区仍是能整份拷走的数据单位。
+- 文件是 `config.json`，只放节拍这类行为参数。文件缺失或读不懂都用默认值，配置坏了不挡打开。
+- 自动保存的落盘间隔取 `autosave.intervalMs`，缺省 2000 毫秒；缩略图重画间隔取 `autosave.thumbnailIntervalMs`，缺省 5000 毫秒。
 
 ## 加载
 
