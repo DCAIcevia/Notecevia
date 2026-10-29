@@ -100,6 +100,44 @@ describe("document store", () => {
     expect(store.redoDepth).toBe(0);
   });
 
+  it("新建块带默认正文，删除时正文一起走", async () => {
+    const store = useDocumentStore();
+    await store.open(1);
+
+    store.beginGesture();
+    const id = store.addEntry("table", { x: 0, y: 0, width: 300, height: 160, rotation: 0 });
+    store.endGesture();
+
+    const created = store.document?.bodies.find((body) => body.id === id);
+    expect(created?.kind).toBe("table");
+    expect(store.undoDepth).toBe(1);
+
+    store.beginGesture();
+    store.removeEntry(id);
+    store.endGesture();
+
+    expect(store.entry(id)).toBeUndefined();
+    expect(store.document?.bodies.some((body) => body.id === id)).toBe(false);
+  });
+
+  it("文本写回只在真的变了时动文档", async () => {
+    const store = useDocumentStore();
+    await store.open(1);
+
+    store.beginGesture();
+    store.setText(1, "改了正文");
+    store.setText(1, "改了正文");
+    store.endGesture();
+
+    expect(store.undoDepth).toBe(1);
+    const body = store.document?.bodies.find((item) => item.id === 1);
+    expect(body?.kind === "text" ? body.text : "").toBe("改了正文");
+
+    store.undo();
+    const restored = store.document?.bodies.find((item) => item.id === 1);
+    expect(restored?.kind === "text" ? restored.text : "").toBe("正文");
+  });
+
   it("改动后按策略的间隔存盘", async () => {
     vi.useFakeTimers();
     const store = useDocumentStore();

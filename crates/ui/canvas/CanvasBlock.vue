@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { Film, Music } from "@lucide/vue";
 import type { Body, Entry, Rgb } from "../api/types";
 import MediaImage from "./MediaImage.vue";
 
 const props = withDefaults(
-  defineProps<{ entry: Entry; body: Body | undefined; selected?: boolean }>(),
-  { selected: false },
+  defineProps<{ entry: Entry; body: Body | undefined; selected?: boolean; editing?: boolean }>(),
+  { selected: false, editing: false },
 );
+
+const emit = defineEmits<{ text: [value: string]; commit: [] }>();
+
+const editor = ref<HTMLElement | null>(null);
 
 function rgb(value: Rgb | null | undefined): string | undefined {
   return value ? `rgb(${value[0]}, ${value[1]}, ${value[2]})` : undefined;
@@ -24,20 +28,65 @@ const frame = computed(() => {
     zIndex: props.entry.z,
   };
 });
+
+const textStyle = computed(() => {
+  const body = props.body;
+  if (body?.kind !== "text") return {};
+  return {
+    fontFamily: body.font ?? undefined,
+    fontSize: `${body.size ?? 16}px`,
+    color: rgb(body.color) ?? "var(--color-text)",
+    background: rgb(body.background),
+  };
+});
+
+async function focusEditor(): Promise<void> {
+  await nextTick();
+  const element = editor.value;
+  if (!element) return;
+  if (props.body?.kind === "text") element.textContent = props.body.text;
+  element.focus();
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+watch(
+  () => props.editing,
+  (editing) => {
+    if (editing) void focusEditor();
+  },
+  { immediate: true },
+);
+
+function onInput(event: Event): void {
+  emit("text", (event.target as HTMLElement).innerText);
+}
 </script>
 
 <template>
-  <div class="block" :class="{ 'block--selected': selected }" :data-entry="entry.id" :style="frame">
+  <div
+    class="block"
+    :class="{ 'block--selected': selected, 'block--editing': editing }"
+    :data-entry="entry.id"
+    :style="frame"
+  >
     <div
-      v-if="body?.kind === 'text'"
-      class="text"
-      :style="{
-        fontFamily: body.font ?? undefined,
-        fontSize: `${body.size ?? 16}px`,
-        color: rgb(body.color) ?? 'var(--color-text)',
-        background: rgb(body.background),
-      }"
-    >{{ body.text }}</div>
+      v-if="body?.kind === 'text' && editing"
+      ref="editor"
+      class="text text--editing"
+      :style="textStyle"
+      contenteditable="true"
+      spellcheck="false"
+      @input="onInput"
+      @blur="emit('commit')"
+      @keydown.esc.prevent.stop="emit('commit')"
+    />
+
+    <div v-else-if="body?.kind === 'text'" class="text" :style="textStyle">{{ body.text }}</div>
 
     <MediaImage
       v-else-if="body?.kind === 'image'"
@@ -93,6 +142,11 @@ const frame = computed(() => {
   box-shadow: 0 0 0 1px var(--color-accent);
 }
 
+.block--editing {
+  box-shadow: 0 0 0 2px var(--color-accent);
+  cursor: text;
+}
+
 .text {
   width: 100%;
   height: 100%;
@@ -100,6 +154,13 @@ const frame = computed(() => {
   white-space: pre-wrap;
   line-height: 1.5;
   word-break: break-word;
+}
+
+.text--editing {
+  overflow: auto;
+  outline: none;
+  cursor: text;
+  user-select: text;
 }
 
 .table {

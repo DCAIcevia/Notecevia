@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowLeft, Maximize, Minus, Plus, Redo2, Undo2 } from "@lucide/vue";
+import { ArrowLeft, Highlighter, Maximize, Minus, Plus, Redo2, Square, Table2, Type, Undo2 } from "@lucide/vue";
 import BaseButton from "../components/base/BaseButton.vue";
+import type { BlockKind } from "../api/types";
 import CanvasBlock from "../canvas/CanvasBlock.vue";
 import { useViewport, type Box } from "../canvas/useViewport";
 import { useConfigStore } from "../stores/config";
@@ -15,6 +16,7 @@ const config = useConfigStore();
 
 const surface = ref<HTMLElement | null>(null);
 const selectedId = ref<number | null>(null);
+const editingId = ref<number | null>(null);
 const viewport = useViewport();
 const panning = ref(false);
 
@@ -86,6 +88,58 @@ function onWheel(event: WheelEvent): void {
   }
 }
 
+function startEdit(id: number): void {
+  const entry = doc.entry(id);
+  if (!entry || entry.locked || entry.kind !== "text") return;
+  doc.beginGesture();
+  selectedId.value = id;
+  editingId.value = id;
+}
+
+function commitEdit(): void {
+  if (editingId.value === null) return;
+  editingId.value = null;
+  doc.endGesture();
+}
+
+/** 新建块落在视口中心。文本建完直接进编辑，一次撤销同时收回创建与输入。 */
+function createBlock(kind: BlockKind): void {
+  const element = surface.value;
+  if (!element || !doc.document) return;
+  const size =
+    kind === "text"
+      ? { width: 240, height: 76 }
+      : kind === "table"
+        ? { width: 300, height: 160 }
+        : { width: 160, height: 160 };
+  const centerX = (element.clientWidth / 2 - viewport.x.value) / viewport.scale.value;
+  const centerY = (element.clientHeight / 2 - viewport.y.value) / viewport.scale.value;
+
+  doc.beginGesture();
+  const id = doc.addEntry(kind, {
+    x: centerX - size.width / 2,
+    y: centerY - size.height / 2,
+    width: size.width,
+    height: size.height,
+    rotation: 0,
+  });
+  selectedId.value = id;
+  if (kind === "text") {
+    editingId.value = id;
+  } else {
+    doc.endGesture();
+  }
+}
+
+function removeSelected(): void {
+  const id = selectedId.value;
+  if (id === null) return;
+  doc.beginGesture();
+  doc.removeEntry(id);
+  doc.endGesture();
+  selectedId.value = null;
+}
+
 let panOrigin = { x: 0, y: 0 };
 let moving: { id: number; startX: number; startY: number; baseX: number; baseY: number; changed: boolean } | null =
   null;
@@ -97,6 +151,8 @@ function onPointerDown(event: PointerEvent): void {
 
   if (holder) {
     const id = Number(holder.dataset.entry);
+    if (editingId.value !== null && editingId.value !== id) commitEdit();
+    if (editingId.value === id) return;
     const entry = doc.entry(id);
     if (!entry) return;
     selectedId.value = id;
@@ -132,6 +188,12 @@ function onPointerMove(event: PointerEvent): void {
   }
 }
 
+function onDoubleClick(event: MouseEvent): void {
+  const holder = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-entry]");
+  if (!holder) return;
+  startEdit(Number(holder.dataset.entry));
+}
+
 function onPointerUp(): void {
   if (moving) {
     doc.endGesture();
@@ -148,7 +210,15 @@ function zoom(factor: number): void {
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
+    if (editingId.value !== null) commitEdit();
     selectedId.value = null;
+    return;
+  }
+  if (editingId.value !== null) return;
+  if (event.key === "Delete" || event.key === "Backspace") {
+    if (selectedId.value === null) return;
+    event.preventDefault();
+    removeSelected();
     return;
   }
   if (!(event.ctrlKey || event.metaKey)) return;
@@ -204,6 +274,7 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @dblclick="onDoubleClick"
     >
       <div class="board__layer" :style="{ transform: viewport.transform.value }">
         <CanvasBlock
@@ -212,6 +283,9 @@ onBeforeUnmount(() => {
           :entry="item.entry"
           :body="item.body"
           :selected="selectedId === item.entry.id"
+          :editing="editingId === item.entry.id"
+          @text="doc.setText(item.entry.id, $event)"
+          @commit="commitEdit"
         />
       </div>
 
@@ -227,6 +301,21 @@ onBeforeUnmount(() => {
 
       <div v-else-if="blocks.length === 0" class="board__overlay">
         <span class="board__note">这张画板还没有内容</span>
+      </div>
+
+      <div v-if="editingId === null" class="board__tools">
+        <button class="chip" type="button" aria-label="新建文本" @click="createBlock('text')">
+          <Type :size="15" :stroke-width="1.75" />
+        </button>
+        <button class="chip" type="button" aria-label="新建形状" @click="createBlock('shape')">
+          <Square :size="15" :stroke-width="1.75" />
+        </button>
+        <button class="chip" type="button" aria-label="新建表格" @click="createBlock('table')">
+          <Table2 :size="15" :stroke-width="1.75" />
+        </button>
+        <button class="chip" type="button" aria-label="新建高亮" @click="createBlock('highlight')">
+          <Highlighter :size="15" :stroke-width="1.75" />
+        </button>
       </div>
 
       <div class="board__zoom">
@@ -352,6 +441,20 @@ onBeforeUnmount(() => {
 .board__actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.board__tools {
+  position: absolute;
+  bottom: var(--space-3);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-overlay);
+  transform: translateX(-50%);
 }
 
 .board__zoom {

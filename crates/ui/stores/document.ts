@@ -6,7 +6,7 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef, triggerRef } from "vue";
 import { api } from "../api/client";
-import type { DocumentDto, Entry, IpcFailure } from "../api/types";
+import type { Body, BlockKind, DocumentDto, Entry, Geometry, IpcFailure } from "../api/types";
 
 const HISTORY_LIMIT = 100;
 
@@ -65,6 +65,61 @@ export const useDocumentStore = defineStore("document", () => {
 
   function entry(id: number): Entry | undefined {
     return document.value?.entries.find((item) => item.id === id);
+  }
+
+  function nextEntryId(): number {
+    const ids = document.value?.entries.map((item) => item.id) ?? [];
+    return ids.length === 0 ? 1 : Math.max(...ids) + 1;
+  }
+
+  /** 新建块的默认正文；媒体块要等文件进来，暂不给正文。 */
+  function defaultBody(kind: BlockKind, id: number): Body | null {
+    switch (kind) {
+      case "text":
+        return { kind: "text", id, text: "" };
+      case "table":
+        return { kind: "table", id, rows: 3, cols: 3, cells: Array.from({ length: 9 }, () => "") };
+      case "shape":
+        return {
+          kind: "shape",
+          id,
+          shape: "rect",
+          fill: [233, 240, 252],
+          stroke: [52, 102, 201],
+          strokeWidth: 2,
+        };
+      case "highlight":
+        return { kind: "highlight", id, color: [255, 224, 102], opacity: 0.35 };
+      default:
+        return null;
+    }
+  }
+
+  /** 加一个块，返回它的编号。撤销与置脏由调用方用 beginGesture／endGesture 包住。 */
+  function addEntry(kind: BlockKind, geometry: Geometry): number {
+    if (!document.value) return 0;
+    const id = nextEntryId();
+    const created: Entry = { id, kind, geometry, z: 0, locked: false, visible: true };
+    const body = defaultBody(kind, id);
+    document.value.entries = [...document.value.entries, created];
+    if (body) document.value.bodies = [...document.value.bodies, body];
+    triggerRef(document);
+    return id;
+  }
+
+  function removeEntry(id: number): void {
+    if (!document.value) return;
+    document.value.entries = document.value.entries.filter((item) => item.id !== id);
+    document.value.bodies = document.value.bodies.filter((item) => item.id !== id);
+    triggerRef(document);
+  }
+
+  /** 文本编辑逐次写回正文；撤销由编辑开始与结束的两个手势边界决定。 */
+  function setText(id: number, value: string): void {
+    const body = document.value?.bodies.find((item) => item.id === id);
+    if (!body || body.kind !== "text" || body.text === value) return;
+    body.text = value;
+    triggerRef(document);
   }
 
   /** 拖动时逐帧调用：只改坐标，置脏与撤销交给手势结束。 */
@@ -167,6 +222,9 @@ export const useDocumentStore = defineStore("document", () => {
     open,
     entries,
     entry,
+    addEntry,
+    removeEntry,
+    setText,
     moveEntry,
     beginGesture,
     endGesture,
