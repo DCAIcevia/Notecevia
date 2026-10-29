@@ -3,8 +3,6 @@ resolver = "3"
 members = [
     "crates/core",
     "crates/store",
-    "crates/ui",
-    "crates/os",
     "crates/app",
 ]
 
@@ -16,12 +14,15 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-egui = "0.37"
-eframe = "0.37"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-opener = "2"
 thiserror = "2"
-# egui 的系统字体提供者已为 yeslogic-fontconfig-sys 打开 dlopen，两个 fontique 版本共用这一个 sys crate，
-# 特性必须一致，否则 Linux 上 fontique 0.12 找不到 fontconfig 符号。
-fontique = { version = "0.12", features = ["fontconfig-dlopen"] }
-# 窗口句柄的类型来自 eframe 内部同一个版本，必须与它一致才能互相转换。
-raw-window-handle = "0.6"
+
+# Tauri 官方的产物配置：只能写在 workspace 根，成员包里的 [profile] 会被忽略。
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

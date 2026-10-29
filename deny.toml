@@ -7,9 +7,9 @@ unmaintained = "all"
 yanked = "deny"
 # 上游升级后如果某条 advisory 不再命中，cargo-deny 会以 advisory-not-detected 告警，据此清理本列表。
 ignore = [
-  # ttf-parser 0.25.1：ab_glyph → sctk-adwaita → winit 拉入，winit 换掉 ab_glyph 后删除。
-  "RUSTSEC-2026-0192",
-  # zvariant 5.15.1：accesskit_unix → accesskit_atspi_common 拉入，accesskit 迁移到 zbus 6 后删除。
+  # proc-macro-error 1.0.4：glib-macros 0.18 的构建期依赖，只有 Linux 的 GTK 栈用，二进制不链入；gtk-rs 还没换掉。
+  "RUSTSEC-2024-0370",
+  # zvariant 5.15.1：tauri-plugin-opener 在 Linux 上经 zbus 拉入，等上游升级后删除。
   "RUSTSEC-2026-0370",
   # zbus_names 4.3.5：同上。
   "RUSTSEC-2026-0371",
@@ -23,13 +23,11 @@ allow = [
   "0BSD",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
-  "BSD-2-Clause",
   "BSD-3-Clause",
-  "BSL-1.0",
-  "ISC",
+  # Tauri 的 HTML/CSS 解析栈（cssparser、selectors、dom_query）与 option-ext 是 MPL-2.0：
+  # 文件级弱 copyleft，作为依赖分发，对应源码可从 crates.io 取回。
+  "MPL-2.0",
   "MIT",
-  "OFL-1.1",
-  "Ubuntu-font-1.0",
   "Unicode-3.0",
   "Unlicense",
   "Zlib",
@@ -39,7 +37,7 @@ allow = [
 # 注册表依赖不得写通配符版本；workspace 内部 crate 的 path 依赖不带 version 是正常写法，放行。
 wildcards = "deny"
 allow-wildcard-paths = true
-# 已知重复版本全部来自 egui/eframe/winit/wgpu 上游，本仓库无法消除，只告警不失败。
+# 已知重复版本来自 tauri/gtk 上游，本仓库无法消除，只告警不失败。
 multiple-versions = "warn"
 
 [sources]

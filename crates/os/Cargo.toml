@@ -1,9 +1,0 @@
-[package]
-name = "notecevia-os"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-publish = false
-
-[dependencies]
-raw-window-handle.workspace = true

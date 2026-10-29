@@ -1,21 +1,19 @@
 [package]
-name = "notecevia-app"
+name = "notecevia"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "Notecevia 的窗口壳：把 Rust 内核接到 Web 界面上"
 
-[[bin]]
-name = "notecevia"
-path = "src/main.rs"
+[lib]
+# 库名加 _lib 后缀：Windows 上 lib 与 bin 同名会冲突，见 rust-lang/cargo#8519。
+name = "notecevia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
 
 [dependencies]
-notecevia-core = { path = "../core" }
-notecevia-store = { path = "../store" }
-notecevia-ui = { path = "../ui" }
-notecevia-os = { path = "../os" }
-egui.workspace = true
-raw-window-handle.workspace = true
-eframe.workspace = true
-image.workspace = true
-rfd = "0.17.2"
+tauri.workspace = true
+tauri-plugin-opener.workspace = true
