@@ -89,28 +89,65 @@ impl ThumbnailSource for DiskThumbnails {
 
 /// 界面要的那几件窗口行为的实现。只把平台层包一下，不把平台类型漏给界面。
 #[derive(Clone, Copy)]
-struct Hooks(Option<notecevia_os::Native>);
+struct Hooks {
+    native: Option<notecevia_os::Native>,
+    /// 截图验收时钉死系统上报的悬停状态。指针停不停在按钮上是随机的，
+    /// 不钉住同一份代码会截出两张图。
+    frozen: bool,
+}
 
 impl notecevia_ui::window::WindowHooks for Hooks {
     fn cursor_position(&self) -> Option<(f32, f32)> {
-        self.0.and_then(|native| native.cursor_position())
+        self.native.and_then(|native| native.cursor_position())
     }
 
     fn primary_button_down(&self) -> Option<bool> {
-        self.0.map(|native| native.primary_button_down())
+        self.native.map(|native| native.primary_button_down())
     }
 
     fn show_system_menu(&self, x: f32, y: f32) -> bool {
-        self.0
+        self.native
             .is_some_and(|native| native.show_system_menu(x as i32, y as i32))
     }
 
     fn toggle_maximize(&self) -> Option<bool> {
-        self.0.and_then(|native| native.toggle_maximize())
+        self.native.and_then(|native| native.toggle_maximize())
     }
 
     fn is_maximized(&self) -> Option<bool> {
-        self.0.and_then(|native| native.is_maximized())
+        self.native.and_then(|native| native.is_maximized())
+    }
+
+    /// 界面报的是物理像素，平台层要的也是物理像素：这里只换类型，不做换算。
+    fn caption_zones(&self, zones: notecevia_ui::window::CaptionZones) {
+        let Some(native) = self.native else {
+            return;
+        };
+        let rect = |rect: egui::Rect| notecevia_os::Rect {
+            x: rect.min.x,
+            y: rect.min.y,
+            w: rect.width(),
+            h: rect.height(),
+        };
+        native.set_caption_zones(notecevia_os::CaptionZones {
+            icon: zones.icon.map(rect),
+            maximize: zones.maximize.map(rect),
+        });
+    }
+
+    fn handles_caption(&self) -> bool {
+        self.native.is_some_and(|native| native.handles_caption())
+    }
+
+    fn caption_pointer(&self) -> Option<notecevia_ui::window::CaptionPointer> {
+        if self.frozen {
+            return Some(notecevia_ui::window::CaptionPointer::default());
+        }
+        let pointer = self.native.and_then(|native| native.caption_pointer())?;
+        Some(notecevia_ui::window::CaptionPointer {
+            hovered: pointer.hovered,
+            pressed: pointer.pressed,
+        })
     }
 }
 
@@ -1183,7 +1220,10 @@ impl eframe::App for App {
             }
         }
 
-        let hooks = Hooks(self.native);
+        let hooks = Hooks {
+            native: self.native,
+            frozen: self.shot.is_some(),
+        };
         let views = notecevia_ui::shell::Views {
             home: &mut self.home,
             library: Some(&mut self.library),

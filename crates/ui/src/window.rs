@@ -7,6 +7,30 @@
 //! （notecevia-os），这里不出现任何平台细节。平台没有实现就返回 None，
 //! 界面层退回 egui 自己的通用命令，所以缺了这一层窗口仍然能用。
 
+/// 标题栏里准备交给系统处理的两块矩形，物理像素，客户区左上角为原点。
+///
+/// 界面自己画窗口按钮，但有两块必须让系统接管才有系统行为：图标（单击出系统
+/// 菜单、双击关窗）与最大化按钮（Win11 贴靠布局浮窗只认系统认得的按钮区域）。
+/// 界面每帧把位置报上去，系统按它的规矩处理；其余按钮仍由界面自己响应。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CaptionZones {
+    /// 窗口图标所在的那一格。
+    pub icon: Option<egui::Rect>,
+    /// 最大化（或还原）按钮所在的那一格。
+    pub maximize: Option<egui::Rect>,
+}
+
+/// 系统接管的那一块此刻的指针状态。
+///
+/// 交给系统之后，界面收不到这些位置的指针事件，悬停与按下只能问系统。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CaptionPointer {
+    /// 指针停在这一块上。
+    pub hovered: bool,
+    /// 指针按在这一块上。
+    pub pressed: bool,
+}
+
 /// 平台补上的窗口行为。
 pub trait WindowHooks {
     /// 在屏幕坐标处弹出系统窗口菜单。标题栏里没有控件的地方右键就该出这个。
@@ -26,6 +50,19 @@ pub trait WindowHooks {
 
     /// 现在是不是最大化。
     fn is_maximized(&self) -> Option<bool>;
+
+    /// 把标题栏里要交给系统的两块报上去。每帧调用，坐标是物理像素。
+    fn caption_zones(&self, _zones: CaptionZones) {}
+
+    /// 系统是不是已经接管了图标与最大化按钮。接管了，界面就别抢这两个点击。
+    fn handles_caption(&self) -> bool {
+        false
+    }
+
+    /// 系统接管的那一块此刻悬停、按下没有。
+    fn caption_pointer(&self) -> Option<CaptionPointer> {
+        None
+    }
 }
 
 /// 没有平台实现时用它：什么都不管。

@@ -49,7 +49,7 @@ cargo test --workspace
 | `crates/core` | `notecevia-core` | 领域逻辑与用例 |
 | `crates/store` | `notecevia-store` | 文件读写与索引 |
 | `crates/ui` | `notecevia-ui` | 状态映射成界面 |
-| `crates/os` | `notecevia-os` | 系统窗口行为：无边框窗口的拖动、拉边、最大化 |
+| `crates/os` | `notecevia-os` | 系统窗口行为：拖动、拉边、最大化、系统菜单、贴靠布局 |
 | `crates/app` | `notecevia-app` | 组装与入口 |
 
 依赖单向：`app` → `store`、`ui`、`os`；`store`、`ui` → `core`。`core` 不依赖内部 crate，也不碰文件、时钟、随机数、界面类型。`ui` 不认识 `os`：界面只说"开始拖动""切最大化"，由 `app` 把两者接起来。
@@ -57,3 +57,5 @@ cargo test --workspace
 每个 crate 顶部有 `#![deny(rustdoc::broken_intra_doc_links)]`，`crates/os` 以外的 crate 另有 `#![forbid(unsafe_code)]`，新增模块沿用。界面依赖 `egui`／`eframe`，其余标准库能合理实现就不加。
 
 `crates/os` 是全库唯一允许 `unsafe` 的地方：窗口句柄、窗口样式的读写只能直接调系统接口。它对外只暴露"能不能做"的布尔与选项，平台没有实现就返回否，界面退回 egui 自己的通用命令——所以这一层缺了，窗口仍然能用。
+
+界面自己画窗口按钮，但有两块交给系统才成立：图标（单击出系统菜单、双击关窗）与最大化按钮（Win11 贴靠布局浮窗只认系统认得的区域）。界面每帧把这两块按物理像素报上去，系统接管的区域收不到指针事件，悬停与按下状态由系统回报。没有实现的平台（Linux、macOS）不报，界面退回通用命令：拖动走 `StartDrag`，拉边走 `BeginResize`，最大化走 `Maximized`，三个窗口按钮都自己响应。
