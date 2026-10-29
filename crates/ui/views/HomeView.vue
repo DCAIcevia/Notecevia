@@ -12,7 +12,7 @@ import BoardListPane from "../components/BoardListPane.vue";
     <div class="blank">
       <img class="blank__lockup" src="/lockup.svg" alt="Notecevia" />
       <p class="blank__title">还没有打开画板</p>
-      <p class="blank__hint">从左边选一张，或者点搜索框右边的 ＋ 新建。</p>
+      <p class="blank__hint">从左边挑一张，或者新建一张。</p>
     </div>
   </AppShell>
 </template>
@@ -28,7 +28,7 @@ import BoardListPane from "../components/BoardListPane.vue";
 }
 
 .blank__lockup {
-  height: 30px;
+  height: 48px;
   margin-bottom: var(--space-3);
   opacity: 0.9;
 }

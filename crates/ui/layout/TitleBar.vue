@@ -8,7 +8,7 @@ const shell = useShellStore();
 
 <template>
   <header v-if="shell.mode !== 'native'" class="titlebar" data-tauri-drag-region>
-    <img class="titlebar__mark" src="/icon.svg" alt="" width="16" height="16" />
+    <img class="titlebar__mark" src="/icon.svg" alt="" width="18" height="18" />
     <span class="titlebar__brand" data-tauri-drag-region>Notecevia</span>
     <span class="titlebar__drag" data-tauri-drag-region />
   </header>
@@ -28,15 +28,16 @@ const shell = useShellStore();
 
 .titlebar__mark {
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin-right: var(--space-2);
 }
 
 .titlebar__brand {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  letter-spacing: 0.02em;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--color-text);
+  letter-spacing: 0.01em;
   pointer-events: auto;
 }
 
