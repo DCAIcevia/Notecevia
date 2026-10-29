@@ -122,7 +122,8 @@
   全是矢量，改色只动填充值。
 - 应用只取 **NC 方章**：`public/icon.svg` 是从品牌表里裁出来的单章，用作 favicon、窗口图标、
   安装包图标与标题栏左侧 16px 标记。
-- 字标（描边结构）只在大尺寸场合用，例如空态或关于页；16–24px 下笔画会粘在一起。
+- 字标组合（NC + 字标）在 `public/lockup.svg`，只在大尺寸场合用：首页空态 26px 高。
+  34px 的标题栏里不用字标，用方章 + 界面字体文字，避免和小字号较劲。
 - 图标成套由 `pnpm tauri icon public/icon.svg --output crates/app/icons` 生成，移动端产物删掉
   （Alpha 不做移动端）。
 
