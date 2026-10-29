@@ -4,7 +4,10 @@ import { Film, Music } from "@lucide/vue";
 import type { Body, Entry, Rgb } from "../api/types";
 import MediaImage from "./MediaImage.vue";
 
-const props = defineProps<{ entry: Entry; body: Body | undefined }>();
+const props = withDefaults(
+  defineProps<{ entry: Entry; body: Body | undefined; selected?: boolean }>(),
+  { selected: false },
+);
 
 function rgb(value: Rgb | null | undefined): string | undefined {
   return value ? `rgb(${value[0]}, ${value[1]}, ${value[2]})` : undefined;
@@ -24,7 +27,7 @@ const frame = computed(() => {
 </script>
 
 <template>
-  <div class="block" :style="frame">
+  <div class="block" :class="{ 'block--selected': selected }" :data-entry="entry.id" :style="frame">
     <div
       v-if="body?.kind === 'text'"
       class="text"
@@ -83,6 +86,11 @@ const frame = computed(() => {
 .block {
   position: absolute;
   transform-origin: center center;
+}
+
+/* 选中只加一圈描边，不改几何 */
+.block--selected {
+  box-shadow: 0 0 0 1px var(--color-accent);
 }
 
 .text {

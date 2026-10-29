@@ -17,7 +17,7 @@
 
 ## 状态在哪
 
-- 文档模型是 `core::Document`，撤销历史是 `core::History`：内存里的整份文档快照，栈最多 100 步；一次手势算一步。
+- 文档模型是 `core::Document`；新界面把整份文档留在前端，撤销也存快照，栈最多 100 步，一次手势算一步（`crates/ui/stores/document.ts`）。
 - 脏标记由「当前文档与上次保存的快照」比较得出，撤销回到保存点时自动变干净。
 - `store::Workspace` 里带一份索引缓存（`RefCell`），所以不是 `Sync`。
 
