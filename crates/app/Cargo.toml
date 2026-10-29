@@ -15,5 +15,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build.workspace = true
 
 [dependencies]
+notecevia-core = { path = "../core" }
+notecevia-store = { path = "../store" }
 tauri.workspace = true
 tauri-plugin-opener.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
