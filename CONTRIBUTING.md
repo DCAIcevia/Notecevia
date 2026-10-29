@@ -4,7 +4,7 @@
 
 ## 开工前
 
-读 `AGENTS.md`。规则只在 `.agents/skills/` 里，按 `AGENTS.md` 的加载表读对应 skill：总规则、提交与发布、界面设计、skill 写法各有入口。
+读 `AGENTS.md`。规则只在 `.agents/skills/` 里，按加载表读对应 skill：任务开始、提交、评审、界面、格式、测试、发布各有入口。
 
 工具链由仓库根的 `rust-toolchain.toml` 固定，rustup 按该文件选择工具链，本地与 CI 一致。
 

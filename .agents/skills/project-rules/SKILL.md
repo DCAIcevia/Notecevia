@@ -1,19 +1,33 @@
 ---
 name: project-rules
-description: 本项目的总规则入口，每次任务开始前先加载。它规定开工前怎么问、读什么、改到什么程度算完成，并把写文档、写 Rust、改 skill 三类细则放在同目录 references/ 里按需读取。只要在 Notecevia 仓库里动手改东西，就先打开它，哪怕任务看起来很小。
+description: Use at the start of any task in this repository, before reading code or changing files, including small edits and design questions. Sets the task protocol — declaration, read budget, when to ask, when to stop, how to report — and routes to the prose, Rust, and skill references. Load it even when the task looks trivial.
 ---
 
-# 项目规则
+# Project rules
 
-Notecevia 是单机离线的桌面笔记应用：画板是数据，内容是块，应用负责把它们画出来、存下来，数据不离开本机。规则都从这条定位长出来——数据不能因为工具出错而丢，界面不能抢内容的风头，规则要能让未来的人或模型读懂并执行。
+Notecevia is an offline, single-machine desktop note board: a board is a file, content is blocks, media lives inside the file, and data never leaves the machine. Every rule below grows from that position. Tool failure must not lose data, the interface must not compete with content, and rules must stay readable by the next person or model.
 
-开工前先写四行声明：任务与完成条件、计划读的文件、验证方式、可逆假设。写不出来，说明任务还没想清楚。
+Before starting, write four lines: the task and its done condition, the files you plan to read, how you will verify, and the assumptions you are making reversible. If you cannot write them, the task is not defined yet.
 
-| 要做的事 | 读哪个文件 | 为什么 |
-| --- | --- | --- |
-| 任何任务 | `references/workflow.md` | 读取预算与提问边界，避免过度探索 |
-| 写说明、注释、README、skill | `references/docs.md` | 文档只写事实，不写历史与口语 |
-| 写或改 Rust | `references/code.md` | 分层、错误处理、门禁与性能预算 |
-| 新建或改 skill | `references/skills.md` | skill 的结构与触发描述写法 |
+## Routing
 
-三条底线，细则没读也要守：该加载的 skill 没加载不动手；改功能范围、加依赖、换 UI 方向先问；没验证不说完成。
+| Situation | Read |
+| --- | --- |
+| Every task | `references/workflow.md` — read budget, when to ask, when to stop, report format |
+| Writing docs, comments, README, or skill prose | `references/docs.md` |
+| Writing or changing Rust | `references/code.md` |
+| Creating or changing a skill | `references/skills.md` |
+
+Domain skills trigger on their own; the load table in [AGENTS.md](../../../AGENTS.md) is the registry: `git-commit`, `ui-design`, `code-review`, `testing`, `data-format`, `release`.
+
+## Red lines
+
+- A task that should have loaded a skill and did not is off-rule.
+- Changing feature scope, adding a dependency, or changing the visual direction: ask first.
+- No completion claim without evidence.
+
+## Boundaries
+
+- This skill is not a style guide. Prose, Rust, and UI rules have their own homes; do not restate them here.
+- When this skill and a repository file disagree, the repository file wins and this skill is fixed in the same change.
+- This skill sets no domain judgment. Reviewing a diff, changing the format, or cutting a release hands off to the skill that owns it.

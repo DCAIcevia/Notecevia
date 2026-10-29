@@ -1,31 +1,51 @@
-# Skill 管理
+# Skill authoring
 
-## 先看 skill-creator
+## Language
 
-新建或修改 skill 前先加载 `skill-creator`（Anthropic 官方，Apache-2.0，原文在 `.agents/skills/skill-creator/`）。它讲通用方法：结构、渐进披露、描述怎么写、怎么用测试提示验证。
+Skills in this repository are written in English, whatever the language of the repository's own docs. English instruction text is followed more reliably by models, and it matches the convention every upstream skill already uses. Quote Chinese repository text only when the exact string matters, such as a message the model must reproduce.
 
-本文件只补本项目特有的约束，通用方法不重复。
+## Structure
 
-## 结构
+One skill, one topic. The directory name equals the frontmatter `name` in kebab-case. `SKILL.md` is the entry: what the skill does, when it triggers, what to read next. Put detail in `references/`; put a deterministic repeated step in `scripts/`; keep templates in `templates/` only when the output shape must be copied exactly.
 
-一个 skill 一个主题。目录名与 frontmatter 的 `name` 一致，kebab-case。SKILL.md 是入口：说明它做什么、什么时候用、接下来读哪个文件。细节放同目录 `references/`，体积大的清单类内容才值得单独成文件。
+```markdown
+---
+name: kebab-case-name
+description: Use when <situation> — <what it does>. <What it does not cover, and where that lives.>
+---
 
-上游引入的 skill 保持原样，不套用本项目的行数建议。
+# Title
 
-## 描述决定它会不会被用上
+<Thesis. What this skill owns, what it does not, and the repository file that owns the rules it applies.>
 
-description 是唯一常驻上下文、也是触发的唯一依据。模型天然倾向于漏触发，所以描述要写清"做什么 + 什么时候用"，并列出用户可能说的场景词。
+## Sources of truth
+## <Body>
+## Boundaries
+## Verification
+```
 
-写成两句：第一句说能力，第二句说触发条件，必要时点明显得相关但容易漏掉的情况。
+## Description
 
-## 规模
+The description is the only text always in context and the only trigger. Write it as: the situations a user would actually name, then the capability, then the fence. Models under-trigger, so name the situation even when it looks obvious.
 
-SKILL.md 控制在 120 行以内；超过就把细节移进 references/，并在入口写清"什么时候读哪个文件"。单个 reference 不超过 200 行，超过就加目录。行数是控制上下文成本的提醒，不是审美要求。
+One paragraph, no line breaks, roughly 40–60 words. Do not open with "Load this before..." alone: that states an obligation without stating a trigger.
 
-## 改 skill 要同步
+## Size
 
-新增、改名、删除 skill，必须在同一次改动里更新 `AGENTS.md` 的加载表，否则它永远不会被加载。改了 skill 的行为，也要检查 description 是否还准确。
+`SKILL.md` stays within 120 lines. A single reference stays within 200; past that, split it by the question it answers and give it a table of contents. Length is a context cost, not a style preference.
 
-## 验证
+## Sources of truth
 
-写完后用 `skill` 工具按名字加载一次，确认 frontmatter 能解析、正文与描述一致。结果可验证的 skill，再准备 2-3 条真实提示跑一遍，看它是否被正确触发、产出是否符合预期。
+A skill that restates a rule owned by `AGENTS.md`, `CONTRIBUTING.md`, or `docs/design/` creates a second copy that will drift. Point at the owning file with a relative link and add only the judgment it does not contain. When a rule must appear locally to be usable, keep it to one sentence and mark it as a pointer.
+
+## Boundaries
+
+Every skill ends with a Boundaries section stating: what it is not for, when to stop and ask, and which skill to hand off to. A skill without a fence absorbs tasks it should not.
+
+## Verification
+
+Name the command and the observation that proves the work. Where the skill guards a failure, add the negative case: what a broken implementation would do that the check must catch. A verification section that only says "review the result" has no content.
+
+## Maintenance
+
+Adding, renaming, or deleting a skill updates the load table in [AGENTS.md](../../../../AGENTS.md) in the same change, or the skill never loads. A skill whose practice has changed is rewritten; one that no longer matches practice is deleted rather than left to rot. Skills imported from upstream (`skill-creator`) stay as upstream supplies them and are exempt from the size limits here.
