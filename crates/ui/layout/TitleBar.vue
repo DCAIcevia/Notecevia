@@ -27,7 +27,7 @@ const shell = useShellStore();
 
 .titlebar__lockup {
   flex: none;
-  height: 20px;
+  height: 22px;
   pointer-events: auto;
 }
 
