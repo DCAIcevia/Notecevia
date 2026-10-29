@@ -12,6 +12,7 @@
     "windows": [
       {
         "title": "Notecevia",
+        "decorations": false,
         "width": 1120,
         "height": 720,
         "minWidth": 720,

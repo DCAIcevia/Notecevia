@@ -3,6 +3,8 @@
 // 导航栏常驻，切区域只换列表栏与主内容；画板与画布共用同一套列表面板。
 import { useRoute } from "vue-router";
 import { BookOpen, Grid, Trash } from "../icons";
+import TitleBar from "./TitleBar.vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const route = useRoute();
 
@@ -12,6 +14,17 @@ const items = [
   { name: "trash", label: "回收站", icon: Trash },
 ] as const;
 
+type Direction = "North" | "South" | "East" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest";
+
+/** 无边框窗口没有系统边框，四条边与四角靠这里交给窗口去拖。 */
+function resize(direction: Direction): void {
+  void getCurrentWindow()
+    .startResizeDragging(direction)
+    .catch(() => {
+      // 浏览器预览里没有窗口对象。
+    });
+}
+
 function isActive(name: string): boolean {
   const current = String(route.name);
   if (name === "library") return current === "library" || current === "volume" || current === "shelf";
@@ -20,7 +33,9 @@ function isActive(name: string): boolean {
 </script>
 
 <template>
-  <main class="shell">
+  <div class="window">
+    <TitleBar />
+    <main class="shell">
     <nav class="shell__rail">
       <RouterLink
         v-for="item in items"
@@ -41,17 +56,106 @@ function isActive(name: string): boolean {
 
     <section class="shell__main island">
       <slot />
-    </section>
-  </main>
+      </section>
+    </main>
+
+    <!-- 无边框窗口的四条边：只有最外圈几像素响应，用作拖拽改大小 -->
+    <span class="grip grip--top" @pointerdown="resize('North')" />
+    <span class="grip grip--bottom" @pointerdown="resize('South')" />
+    <span class="grip grip--left" @pointerdown="resize('West')" />
+    <span class="grip grip--right" @pointerdown="resize('East')" />
+    <span class="grip grip--nw" @pointerdown="resize('NorthWest')" />
+    <span class="grip grip--ne" @pointerdown="resize('NorthEast')" />
+    <span class="grip grip--sw" @pointerdown="resize('SouthWest')" />
+    <span class="grip grip--se" @pointerdown="resize('SouthEast')" />
+  </div>
 </template>
 
 <style scoped>
+.window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-surface-app);
+}
+
 .shell {
   display: flex;
+  flex: 1;
   gap: var(--space-2);
-  height: 100%;
-  padding: var(--space-2);
-  background: var(--color-surface-app);
+  min-height: 0;
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+/* 无边框窗口的拖拽改大小区：只有最外圈 4 像素，压在内容之上 */
+.grip {
+  position: absolute;
+  z-index: 10;
+}
+
+.grip--top,
+.grip--bottom {
+  right: 8px;
+  left: 8px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.grip--top {
+  top: 0;
+}
+
+.grip--bottom {
+  bottom: 0;
+}
+
+.grip--left,
+.grip--right {
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.grip--left {
+  left: 0;
+}
+
+.grip--right {
+  right: 0;
+}
+
+.grip--nw,
+.grip--ne,
+.grip--sw,
+.grip--se {
+  width: 8px;
+  height: 8px;
+}
+
+.grip--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.grip--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.grip--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.grip--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
 }
 
 .shell__rail {
