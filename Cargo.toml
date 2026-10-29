@@ -17,6 +17,8 @@ publish = false
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 
 # Tauri 官方的产物配置：只能写在 workspace 根，成员包里的 [profile] 会被忽略。

@@ -5,13 +5,13 @@
 | 层 | 目录 | 职责 |
 | --- | --- | --- |
 | 前端 | `crates/ui` | Vue 3 + Vite 前端源码；构建入口 `index.html`、`package.json`、`vite.config.ts`、`tsconfig.json`、`tsconfig.node.json`、`public/` 在仓库根，产物在根 `dist/` |
-| 窗口壳 | `crates/app` | Tauri 2 窗口壳，包名与二进制名 `notecevia`；起应用并把前端命令接到内核 |
+| 窗口壳 | `crates/app` | Tauri 2 窗口壳，包名与二进制名 `notecevia`；把 `core`／`store` 包成 IPC 命令 |
 | 内核 | `crates/core` | 文档模型、块、撤销历史、对齐与分布；不碰文件与界面 |
 | 存储 | `crates/store` | 工作区读写、媒体池、索引缓存、回收站、列表与搜索、容器与 HTML 导出和导入 |
 
-依赖方向单向：`core` ← `store`、`core` ← `crates/app`、`store` ← `crates/app`；`crates/app` 只依赖 `tauri` 与 `tauri-plugin-opener`，还没加对 `core`、`store` 的路径依赖。
+依赖方向单向：`core` ← `store`、`core` ← `crates/app`、`store` ← `crates/app`；`crates/app` 以路径依赖引用 `core`、`store`，另依赖 `tauri` 与 `tauri-plugin-opener`。
 
-前端经 Tauri 命令调用窗口壳；窗口壳只注册示例命令 `greet`，尚未接上内核。
+前端经 Tauri 命令调用窗口壳；命令契约见 `docs/design/ipc.md`，`greet` 是遗留示例命令，前端界面尚未接上。
 
 以下加载、保存与交互规则描述目标行为；其中自动保存、缩略图生成与索引刷新由界面层驱动，新界面尚未实现。
 
