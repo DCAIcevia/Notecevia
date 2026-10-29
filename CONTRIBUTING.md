@@ -39,6 +39,6 @@ cargo about generate --locked about.hbs --output-file THIRD_PARTY_LICENSES.md
 
 ## 发布
 
-推 `v*` 标签触发发布流程：先校验标签、版本与许可证，再在 Linux、Windows、macOS 上构建，生成 SBOM 与构建来源证明，最后创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。
+推 `v*` 标签触发发布流程：先校验标签、版本与许可证，再在 Linux、Windows、macOS 上构建，生成 SBOM 与构建来源证明，最后创建 GitHub Release。标签里带 `-` 的版本自动标为预发布。平台产物：Windows 生成 msi 与 nsis 安装包，Linux 生成 deb 与 AppImage，macOS 生成 dmg；发布资产另附 `LICENSE`、`NOTICE`、`THIRD_PARTY_LICENSES.md` 与 `SHA256SUMS`。
 
-发布流程校验标签与 `notecevia-app` 的版本一致、标签提交在 `main` 上，不一致即失败；产物附 SHA256 校验和、构建来源证明与 SPDX SBOM。发布先创建草稿并上传资产，再转为正式发布；`v*` 标签由 ruleset 保护，不能删除或移动，`release` environment 只允许 `v*` 标签部署。
+发布流程校验标签与 `notecevia` 的版本一致、标签提交在 `main` 上，不一致即失败；产物附 SHA256 校验和、构建来源证明与 SPDX SBOM。发布先创建草稿并上传资产，再转为正式发布；`v*` 标签由 ruleset 保护，不能删除或移动，`release` environment 只允许 `v*` 标签部署。
