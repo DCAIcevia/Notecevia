@@ -46,6 +46,37 @@ const encoder = new TextEncoder();
 
 export async function mockInvoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (command) {
+    case "list_volumes":
+      return [
+        { id: 1, title: "笔记本", pageCount: 2, updatedAt: 1_761_800_000 },
+        { id: 0, title: "Empty book", pageCount: 1, updatedAt: 1_761_700_000 },
+      ];
+    case "load_volume":
+      return { title: "笔记本", pages: [1, 2] };
+    case "create_volume":
+      return { id: 2, title: String(args?.title ?? "未命名册"), pageCount: 0, updatedAt: 1_761_800_000 };
+    case "delete_volume":
+    case "assign_page":
+    case "unassign_page":
+    case "move_page_in_volume":
+    case "save_shelf":
+    case "restore_trash":
+    case "purge_trash_item":
+      return null;
+    case "list_shelves":
+      return [{ id: 1, title: "工作", volumeCount: 1, updatedAt: 1_761_800_000 }];
+    case "load_shelf":
+      return { title: "工作", volumes: [1] };
+    case "create_shelf":
+      return { id: 2, title: String(args?.title ?? "未命名书架"), volumeCount: 0, updatedAt: 1_761_800_000 };
+    case "delete_shelf":
+      return null;
+    case "list_trash":
+      return [
+        { folder: "1761700000-board-7", kind: "board", id: 7, title: "旧草稿", deletedAt: 1_761_700_000, bytes: 2048, daysLeft: 29 },
+      ];
+    case "empty_trash":
+      return 1;
     case "app_config":
       return {
         path: "mock/config.json",

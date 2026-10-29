@@ -10,6 +10,11 @@ import type {
   IpcFailure,
   SaveResult,
   SearchHit,
+  ShelfDto,
+  ShelfSummary,
+  TrashItem,
+  VolumeDto,
+  VolumeSummary,
   WorkspaceStatus,
 } from "./types";
 
@@ -63,4 +68,23 @@ export const api = {
     call<SaveResult>("save_board", { boardId, document }),
   readMedia: (hash: string) => call<ArrayBuffer>("read_media", { hash }),
   writeMedia: (name: string, data: number[]) => call<string>("write_media", { name, data }),
+  listVolumes: () => call<VolumeSummary[]>("list_volumes"),
+  loadVolume: (volumeId: number) => call<VolumeDto>("load_volume", { volumeId }),
+  createVolume: (title: string) => call<VolumeSummary>("create_volume", { title }),
+  deleteVolume: (volumeId: number) => call<null>("delete_volume", { volumeId }),
+  assignPage: (volumeId: number, page: number, at: number) =>
+    call<number | null>("assign_page", { volumeId, page, at }),
+  unassignPage: (page: number) => call<number | null>("unassign_page", { page }),
+  movePageInVolume: (volumeId: number, from: number, to: number) =>
+    call<null>("move_page_in_volume", { volumeId, from, to }),
+  pagesInVolume: (volumeId: number) => call<number[]>("pages_in_volume", { volumeId }),
+  listShelves: () => call<ShelfSummary[]>("list_shelves"),
+  loadShelf: (shelfId: number) => call<ShelfDto>("load_shelf", { shelfId }),
+  saveShelf: (shelfId: number, shelf: ShelfDto) => call<null>("save_shelf", { shelfId, shelf }),
+  createShelf: (title: string) => call<ShelfSummary>("create_shelf", { title }),
+  deleteShelf: (shelfId: number) => call<null>("delete_shelf", { shelfId }),
+  listTrash: () => call<TrashItem[]>("list_trash"),
+  restoreTrash: (folder: string) => call<null>("restore_trash", { folder }),
+  purgeTrashItem: (folder: string) => call<null>("purge_trash_item", { folder }),
+  emptyTrash: () => call<number>("empty_trash"),
 };

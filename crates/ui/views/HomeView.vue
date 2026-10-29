@@ -117,6 +117,8 @@ async function removeBoard(board: BoardSummary): Promise<void> {
       <h1 class="home__title">画板</h1>
       <BaseSearchField class="home__search" placeholder="搜索画板" @search="runSearch" />
       <BaseButton :disabled="creating" @click="createBoard">新建画板</BaseButton>
+      <button class="home__link" type="button" @click="router.push({ name: 'library' })">册与书架</button>
+      <button class="home__link" type="button" @click="router.push({ name: 'trash' })">回收站</button>
     </header>
 
     <p v-if="actionError" class="home__error">{{ actionError }}</p>
@@ -213,6 +215,22 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 
 .home__search {
   flex: 1;
+}
+
+.home__link {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.home__link:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .home__state {

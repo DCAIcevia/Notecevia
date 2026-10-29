@@ -128,3 +128,36 @@ export interface SearchHit {
   title: string;
   snippet: string;
 }
+export interface VolumeSummary {
+  id: number;
+  title: string;
+  pageCount: number;
+  updatedAt: number;
+}
+
+export interface VolumeDto {
+  title: string;
+  pages: number[];
+}
+
+export interface ShelfSummary {
+  id: number;
+  title: string;
+  volumeCount: number;
+  updatedAt: number;
+}
+
+export interface ShelfDto {
+  title: string;
+  volumes: number[];
+}
+
+export interface TrashItem {
+  folder: string;
+  kind: "board" | "volume" | "shelf";
+  id: number;
+  title: string;
+  deletedAt: number;
+  bytes: number;
+  daysLeft: number;
+}

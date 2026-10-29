@@ -55,7 +55,10 @@
 | 视图 | 文件 | 内容 |
 | --- | --- | --- |
 | 首页 | `crates/ui/views/HomeView.vue` | 画板列表、新建画板、加载与错误态、空态 |
-| 画板 | `crates/ui/views/BoardView.vue` | 顶栏、画布视口、缩放控件、打开失败重试 |
+| 画板 | `crates/ui/views/BoardView.vue` | 顶栏、画布视口、工具条、缩放控件、打开失败重试 |
+| 册与书架 | `crates/ui/views/LibraryView.vue` | 册列表与书架列表、新建与删除 |
+| 册内 | `crates/ui/views/VolumeView.vue` | 装订画板、移出、调整页序 |
+| 回收站 | `crates/ui/views/TrashView.vue` | 还原、彻底删除、清空 |
 
 - 画布两层：视口层只做平移与缩放，靠 `transform` 完成；块层按世界坐标绝对定位，缩放不触发重排。
 - 块在 `crates/ui/canvas/CanvasBlock.vue` 绘制，种类由正文的 `kind` 决定；视频与音频共用 `media` 正文。
