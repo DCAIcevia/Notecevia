@@ -94,6 +94,16 @@ export async function mockInvoke(command: string, args?: Record<string, unknown>
       return sampleDocument();
     case "create_board":
       return { id: 99, title: String(args?.title ?? "未命名画板"), tags: [], updatedAt: 1_761_800_000, entryCount: 0 };
+    case "read_thumbnail":
+      return new ArrayBuffer(0);
+    case "save_thumbnail":
+      return null;
+    case "rebuild_index":
+      return boards.length;
+    case "export_container":
+      return "mock/exports/sample.notcevia";
+    case "export_html":
+      return "mock/exports/sample.html";
     case "read_media": {
       const bytes = encoder.encode(sampleSvg);
       return bytes.buffer;

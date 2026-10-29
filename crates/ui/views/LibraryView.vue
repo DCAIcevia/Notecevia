@@ -104,10 +104,10 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
         <BaseEmptyState v-if="shelves.length === 0" title="还没有书架" hint="书架用来分门别类地放册。" />
         <ul v-else class="library__list">
           <li v-for="shelf in shelves" :key="shelf.id" class="item">
-            <div class="row row--static">
+            <button class="row" type="button" @click="router.push({ name: 'shelf', params: { id: shelf.id } })">
               <span class="row__title">{{ shelf.title }}</span>
               <span class="row__meta">{{ shelf.volumeCount }} 册</span>
-            </div>
+            </button>
             <span class="item__actions">
               <button class="item__action item__action--danger" type="button" @click="removeShelf(shelf)">
                 删除

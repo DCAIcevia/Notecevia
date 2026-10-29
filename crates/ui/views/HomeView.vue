@@ -26,12 +26,45 @@ const renamingTitle = ref("");
 const actionError = ref<string | null>(null);
 
 const showingHits = computed(() => query.value.trim().length > 0);
+const thumbs = ref(new Map<number, string>());
+const refreshing = ref(false);
+
+/** 缩略图是缓存：读不到就画纸色空封面，不显示破图。 */
+async function loadThumbnails(): Promise<void> {
+  for (const board of workspace.boards) {
+    if (thumbs.value.has(board.id)) continue;
+    try {
+      const bytes = await api.readThumbnail(board.id);
+      if (bytes.byteLength === 0) continue;
+      const next = new Map(thumbs.value);
+      next.set(board.id, URL.createObjectURL(new Blob([bytes], { type: "image/png" })));
+      thumbs.value = next;
+    } catch {
+      // 一张缩略图读不到不影响列表。
+    }
+  }
+}
+
+async function refreshIndex(): Promise<void> {
+  refreshing.value = true;
+  try {
+    await api.rebuildIndex();
+    thumbs.value = new Map();
+    await workspace.refreshBoards();
+    await loadThumbnails();
+  } catch (error) {
+    actionError.value = (error as { message?: string }).message ?? "刷新失败";
+  } finally {
+    refreshing.value = false;
+  }
+}
 
 async function boot(): Promise<void> {
   bootError.value = null;
   try {
     if (!workspace.status) await workspace.open();
     await workspace.refreshBoards();
+    await loadThumbnails();
   } catch (error) {
     bootError.value = (error as { message?: string }).message ?? "打开工作区失败";
   }
@@ -117,6 +150,7 @@ async function removeBoard(board: BoardSummary): Promise<void> {
       <h1 class="home__title">画板</h1>
       <BaseSearchField class="home__search" placeholder="搜索画板" @search="runSearch" />
       <BaseButton :disabled="creating" @click="createBoard">新建画板</BaseButton>
+      <button class="home__link" type="button" :disabled="refreshing" @click="refreshIndex">刷新</button>
       <button class="home__link" type="button" @click="router.push({ name: 'library' })">册与书架</button>
       <button class="home__link" type="button" @click="router.push({ name: 'trash' })">回收站</button>
     </header>
@@ -175,7 +209,11 @@ async function removeBoard(board: BoardSummary): Promise<void> {
         />
         <template v-else>
           <button class="row" type="button" @click="openBoard(board.id)">
-            <span class="row__title">{{ board.title }}</span>
+            <span class="row__main">
+              <img v-if="thumbs.get(board.id)" class="row__thumb" :src="thumbs.get(board.id)" alt="" />
+              <span v-else class="row__thumb row__thumb--empty" aria-hidden="true" />
+              <span class="row__title">{{ board.title }}</span>
+            </span>
             <span class="row__meta">{{ board.entryCount }} 块 · {{ formatTime(board.updatedAt) }}</span>
           </button>
           <span class="item__actions">
@@ -289,6 +327,26 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 
 .row:hover {
   background: var(--color-surface-hover);
+}
+
+.row__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.row__thumb {
+  flex: none;
+  width: 44px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  box-shadow: var(--shadow-hairline);
+}
+
+.row__thumb--empty {
+  background: var(--color-surface-muted);
 }
 
 .row__title {
