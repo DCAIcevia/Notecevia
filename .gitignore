@@ -33,4 +33,4 @@ fixtures/*/thumbnails/
 #.idea/
 
 # 设计稿只在本地看，不进仓库（改得太快，存进来没意义）
-design
+/design
