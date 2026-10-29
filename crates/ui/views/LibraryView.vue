@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import AppShell from "../layout/AppShell.vue";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseEmptyState from "../components/base/BaseEmptyState.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
@@ -60,13 +61,11 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
 </script>
 
 <template>
-  <main class="app-frame app-frame--column">
-    <header class="library__bar island">
-      <button class="library__back" type="button" @click="router.push({ name: 'home' })">← 画板</button>
+  <AppShell>
+    <header class="library__bar page__bar">
       <h1 class="library__title">册与书架</h1>
     </header>
-    <section class="island island--fill">
-      <div class="island__inset">
+    <div class="page__body">
 
     <p v-if="failure" class="library__error">{{ failure }}</p>
 
@@ -119,18 +118,13 @@ async function removeShelf(shelf: ShelfSummary): Promise<void> {
         </ul>
       </section>
     </template>
-        </div>
-    </section>
-  </main>
+      </div>
+  </AppShell>
 </template>
 
 <style scoped>
 .library__bar {
-  display: flex;
-  flex: none;
-  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .library__back,

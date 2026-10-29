@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import AppShell from "../layout/AppShell.vue";
 import dayjs from "dayjs";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseEmptyState from "../components/base/BaseEmptyState.vue";
@@ -168,20 +169,17 @@ async function removeBoard(board: BoardSummary): Promise<void> {
 </script>
 
 <template>
-  <main class="app-frame app-frame--column">
-    <header class="home__bar island">
+  <AppShell>
+    <header class="home__bar page__bar">
       <h1 class="home__title">画板</h1>
       <BaseSearchField class="home__search" placeholder="搜索画板" @search="runSearch" />
       <BaseButton :disabled="creating" @click="createBoard">新建画板</BaseButton>
       <button class="home__link" type="button" :disabled="refreshing" @click="refreshIndex">刷新</button>
-      <button class="home__link" type="button" @click="router.push({ name: 'library' })">册与书架</button>
-      <button class="home__link" type="button" @click="router.push({ name: 'trash' })">回收站</button>
     </header>
 
     <p v-if="actionError" class="home__error">{{ actionError }}</p>
 
-    <section class="island island--fill">
-      <div class="island__inset">
+    <div class="page__body">
         <div v-if="bootError" class="home__state">
       <p class="home__error">{{ bootError }}</p>
       <BaseButton size="sm" @click="boot">重试</BaseButton>
@@ -250,9 +248,8 @@ async function removeBoard(board: BoardSummary): Promise<void> {
         </template>
       </li>
     </ul>
-      </div>
-    </section>
-  </main>
+    </div>
+  </AppShell>
 </template>
 
 <style scoped>

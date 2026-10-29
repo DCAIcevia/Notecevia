@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import AppShell from "../layout/AppShell.vue";
 import dayjs from "dayjs";
 import BaseButton from "../components/base/BaseButton.vue";
 import BaseEmptyState from "../components/base/BaseEmptyState.vue";
@@ -8,7 +8,6 @@ import BaseSpinner from "../components/base/BaseSpinner.vue";
 import { api } from "../api/client";
 import type { TrashItem } from "../api/types";
 
-const router = useRouter();
 const items = ref<TrashItem[]>([]);
 const loading = ref(true);
 const failure = ref<string | null>(null);
@@ -65,14 +64,12 @@ async function empty(): Promise<void> {
 </script>
 
 <template>
-  <main class="app-frame app-frame--column">
-    <header class="trash__bar island">
-      <button class="trash__back" type="button" @click="router.push({ name: 'home' })">← 画板</button>
+  <AppShell>
+    <header class="trash__bar page__bar">
       <h1 class="trash__title">回收站</h1>
       <BaseButton v-if="items.length > 0" size="sm" @click="empty">清空</BaseButton>
     </header>
-    <section class="island island--fill">
-      <div class="island__inset">
+    <div class="page__body">
 
     <p v-if="failure" class="trash__error">{{ failure }}</p>
     <p class="trash__hint">删掉的东西在这里放 30 天，到期自动清掉。</p>
@@ -96,18 +93,13 @@ async function empty(): Promise<void> {
         </span>
       </li>
     </ul>
-        </div>
-    </section>
-  </main>
+      </div>
+  </AppShell>
 </template>
 
 <style scoped>
 .trash__bar {
-  display: flex;
-  flex: none;
-  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .trash__back {

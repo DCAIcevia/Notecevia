@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import AppShell from "../layout/AppShell.vue";
 import BaseSpinner from "../components/base/BaseSpinner.vue";
 import { api } from "../api/client";
 import type { ShelfDto, VolumeSummary } from "../api/types";
@@ -54,13 +55,12 @@ function remove(volumeId: number): void {
 </script>
 
 <template>
-  <main class="app-frame app-frame--column">
-    <header class="shelf__bar island">
+  <AppShell>
+    <header class="shelf__bar page__bar">
       <button class="shelf__back" type="button" @click="router.push({ name: 'library' })">← 册与书架</button>
       <h1 class="shelf__title">{{ shelf?.title ?? "书架" }}</h1>
     </header>
-    <section class="island island--fill">
-      <div class="island__inset">
+    <div class="page__body">
 
     <p v-if="failure" class="shelf__error">{{ failure }}</p>
 
@@ -101,18 +101,13 @@ function remove(volumeId: number): void {
         </ul>
       </section>
     </template>
-        </div>
-    </section>
-  </main>
+      </div>
+  </AppShell>
 </template>
 
 <style scoped>
 .shelf__bar {
-  display: flex;
-  flex: none;
-  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
 }
 
 .shelf__back {
