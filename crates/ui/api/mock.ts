@@ -55,7 +55,16 @@ export async function mockInvoke(command: string, args?: Record<string, unknown>
       return { title: "笔记本", pages: [1, 2] };
     case "create_volume":
       return { id: 2, title: String(args?.title ?? "未命名册"), pageCount: 0, updatedAt: 1_761_800_000 };
+    case "create_page":
+      return {
+        board: { id: 99, title: String(args?.title ?? "未命名页"), tags: [], updatedAt: 1_761_800_000, entryCount: 0 },
+        volume: { id: Number(args?.volumeId ?? 2), title: "笔记本", pageCount: 1, updatedAt: 1_761_800_000 },
+      };
+    case "pages_in_volume":
+      return [1, 2];
     case "delete_volume":
+    case "shelve_volume":
+    case "unshelve_volume":
     case "assign_page":
     case "unassign_page":
     case "move_page_in_volume":
@@ -71,6 +80,8 @@ export async function mockInvoke(command: string, args?: Record<string, unknown>
       return { id: 2, title: String(args?.title ?? "未命名书架"), volumeCount: 0, updatedAt: 1_761_800_000 };
     case "delete_shelf":
       return null;
+    case "create_shelf_with":
+      return { id: 2, title: String(args?.title ?? "未命名书架"), volumeCount: 2, updatedAt: 1_761_800_000 };
     case "list_trash":
       return [
         { folder: "1761700000-board-7", kind: "board", id: 7, title: "旧草稿", deletedAt: 1_761_700_000, bytes: 2048, daysLeft: 29 },

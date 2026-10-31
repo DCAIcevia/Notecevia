@@ -8,6 +8,7 @@ import type {
   BoardSummary,
   DocumentDto,
   IpcFailure,
+  PageCreated,
   SaveResult,
   SearchHit,
   ShelfDto,
@@ -76,6 +77,8 @@ export const api = {
   listVolumes: () => call<VolumeSummary[]>("list_volumes"),
   loadVolume: (volumeId: number) => call<VolumeDto>("load_volume", { volumeId }),
   createVolume: (title: string) => call<VolumeSummary>("create_volume", { title }),
+  createPage: (title: string, volumeId?: number) =>
+    call<PageCreated>("create_page", volumeId === undefined ? { title } : { title, volumeId }),
   deleteVolume: (volumeId: number) => call<null>("delete_volume", { volumeId }),
   assignPage: (volumeId: number, page: number, at: number) =>
     call<number | null>("assign_page", { volumeId, page, at }),
@@ -88,6 +91,12 @@ export const api = {
   saveShelf: (shelfId: number, shelf: ShelfDto) => call<null>("save_shelf", { shelfId, shelf }),
   createShelf: (title: string) => call<ShelfSummary>("create_shelf", { title }),
   deleteShelf: (shelfId: number) => call<null>("delete_shelf", { shelfId }),
+  shelveVolume: (shelfId: number, volumeId: number) =>
+    call<null>("shelve_volume", { shelfId, volumeId }),
+  unshelveVolume: (shelfId: number, volumeId: number) =>
+    call<null>("unshelve_volume", { shelfId, volumeId }),
+  createShelfWith: (title: string, volumes: number[]) =>
+    call<ShelfSummary>("create_shelf_with", { title, volumes }),
   listTrash: () => call<TrashItem[]>("list_trash"),
   restoreTrash: (folder: string) => call<null>("restore_trash", { folder }),
   purgeTrashItem: (folder: string) => call<null>("purge_trash_item", { folder }),

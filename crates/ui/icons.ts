@@ -5,6 +5,9 @@
 import type { Component } from "vue";
 
 import ArrowLeftIcon from "@lucide/vue/dist/esm/icons/arrow-left.mjs";
+import ArrowUpIcon from "@lucide/vue/dist/esm/icons/arrow-up.mjs";
+import ArrowDownIcon from "@lucide/vue/dist/esm/icons/arrow-down.mjs";
+import ArrowUpFromLineIcon from "@lucide/vue/dist/esm/icons/arrow-up-from-line.mjs";
 import BookOpenIcon from "@lucide/vue/dist/esm/icons/book-open.mjs";
 import TrashIcon from "@lucide/vue/dist/esm/icons/trash.mjs";
 import DownloadIcon from "@lucide/vue/dist/esm/icons/download.mjs";
@@ -28,6 +31,9 @@ import UndoIcon from "@lucide/vue/dist/esm/icons/undo-2.mjs";
 import XIcon from "@lucide/vue/dist/esm/icons/x.mjs";
 
 export const ArrowLeft = ArrowLeftIcon as Component;
+export const ArrowUp = ArrowUpIcon as Component;
+export const ArrowDown = ArrowDownIcon as Component;
+export const ArrowUpFromLine = ArrowUpFromLineIcon as Component;
 export const BookOpen = BookOpenIcon as Component;
 export const Trash = TrashIcon as Component;
 export const Download = DownloadIcon as Component;
