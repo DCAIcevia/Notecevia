@@ -123,11 +123,6 @@ async function createVolume(title: string): Promise<void> {
     <div class="wall__body">
       <div v-if="loading" class="wall__state"><BaseSpinner /></div>
 
-      <div v-else-if="shown.length === 0 && naming !== 'page'" class="wall__empty">
-        <p class="wall__hint">还没有册。</p>
-        <button class="wall__action" type="button" @click="naming = 'page'">新建页</button>
-      </div>
-
       <div v-else class="wall__grid">
         <button
           v-for="volume in shown"
@@ -143,24 +138,38 @@ async function createVolume(title: string): Promise<void> {
           <span class="cover__meta">{{ volume.pageCount }} 页</span>
         </button>
 
+        <button v-if="orphans" class="cover" type="button" @click="open(0)">
+          <span class="cover__frame cover__frame--plain">
+            <span class="cover__mark">{{ orphans.pageCount }}</span>
+          </span>
+          <span class="cover__title">未归档</span>
+          <span class="cover__meta">不属于任何册的页</span>
+        </button>
+
         <div class="cover cover--draft">
-          <BaseInlineField
-            v-if="naming === 'page'"
-            class="cover__naming"
-            placeholder="页名"
-            label="新建页"
-            @submit="createPage"
-            @cancel="naming = null"
-          />
-          <button v-else class="cover__add" type="button" :disabled="creating" @click="naming = 'page'">
-            ＋ 新建页
-          </button>
+          <div class="cover__frame cover__frame--draft">
+            <BaseInlineField
+              v-if="naming === 'page'"
+              class="cover__naming"
+              placeholder="页名"
+              label="新建页"
+              @submit="createPage"
+              @cancel="naming = null"
+            />
+            <button
+              v-else
+              class="cover__add"
+              type="button"
+              :disabled="creating"
+              @click="naming = 'page'"
+            >
+              ＋ 新建页
+            </button>
+          </div>
+          <span class="cover__title">新建页</span>
+          <span class="cover__meta">同时建出一册</span>
         </div>
       </div>
-
-      <button v-if="orphans" class="wall__orphans" type="button" @click="open(0)">
-        未归档 {{ orphans.pageCount }} 页
-      </button>
     </div>
   </AppShell>
 </template>
@@ -223,19 +232,6 @@ async function createVolume(title: string): Promise<void> {
   padding: var(--space-8) 0;
 }
 
-.wall__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-8) 0;
-}
-
-.wall__hint {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
 .wall__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -287,28 +283,30 @@ async function createVolume(title: string): Promise<void> {
   font-variant-numeric: tabular-nums;
 }
 
-.cover--draft {
-  cursor: default;
+.cover__frame--draft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-line-strong);
+  background: none;
+  box-shadow: none;
 }
 
-.cover--draft .cover__frame,
-.cover--draft .cover__naming {
+.cover__frame--plain {
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.cover--draft {
-  justify-content: flex-start;
+.cover__mark {
+  font-size: var(--text-lg);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .cover__add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 4 / 3;
-  border: 1px dashed var(--color-line-strong);
-  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  border: none;
   background: none;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
@@ -316,22 +314,11 @@ async function createVolume(title: string): Promise<void> {
 }
 
 .cover__add:hover:not(:disabled) {
-  background: var(--color-surface-hover);
   color: var(--color-text);
 }
 
 .cover__naming {
-  width: 100%;
+  width: 82%;
 }
 
-.wall__orphans {
-  margin-top: var(--space-4);
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  text-decoration: underline;
-  cursor: pointer;
-}
 </style>
