@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from "vue";
+
 withDefaults(
   defineProps<{
     id?: string;
@@ -12,11 +14,16 @@ withDefaults(
 );
 
 const model = defineModel<string>({ default: "" });
+const input = ref<HTMLInputElement | null>(null);
+
+/** 改名这类就地输入要把焦点交给字段本身，调用方拿不到内部元素。 */
+defineExpose({ focus: () => input.value?.focus() });
 </script>
 
 <template>
   <div class="field">
     <input
+      ref="input"
       :id="id"
       v-model="model"
       class="field__input"

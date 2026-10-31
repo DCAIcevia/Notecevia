@@ -2,17 +2,14 @@
 // 应用骨架：导航栏 + 可选的次级列表栏 + 主内容。
 // 导航栏常驻，切区域只换列表栏与主内容；画板与画布共用同一套列表面板。
 import { useRoute } from "vue-router";
-import { BookOpen, Grid, Trash } from "../icons";
+import { Grid, Trash } from "../icons";
 import TitleBar from "./TitleBar.vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const props = withDefaults(defineProps<{ bare?: boolean }>(), { bare: false });
 const route = useRoute();
 
-const primary = [
-  { name: "home", label: "笔记", icon: Grid },
-  { name: "library", label: "册与书架", icon: BookOpen },
-] as const;
+const primary = [{ name: "home", label: "首页", icon: Grid }] as const;
 
 // 回收站是低频动作，压在导航栏底部，不跟日常导航混在一起。
 const secondary = { name: "trash", label: "回收站", icon: Trash } as const;
@@ -30,7 +27,7 @@ function resize(direction: Direction): void {
 
 function isActive(name: string): boolean {
   const current = String(route.name);
-  if (name === "library") return current === "library" || current === "volume" || current === "shelf";
+  if (name === "home") return current === "home" || current === "volume";
   return current === name;
 }
 </script>

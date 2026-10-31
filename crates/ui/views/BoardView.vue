@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
+  ArrowDown,
+  ArrowUp,
   Download,
   FileCode2,
   Highlighter,
@@ -18,7 +20,8 @@ import {
 import { api } from "../api/client";
 import AppShell from "../layout/AppShell.vue";
 import BaseButton from "../components/base/BaseButton.vue";
-import BoardListPane from "../components/BoardListPane.vue";
+import BaseInlineField from "../components/base/BaseInlineField.vue";
+import PageListPane from "../components/PageListPane.vue";
 import type { BlockKind } from "../api/types";
 import CanvasBlock from "../canvas/CanvasBlock.vue";
 import { renderThumbnail } from "../canvas/thumbnail";
@@ -26,7 +29,7 @@ import { useViewport, type Box } from "../canvas/useViewport";
 import { useConfigStore } from "../stores/config";
 import { useDocumentStore } from "../stores/document";
 
-const props = defineProps<{ id: string }>();
+const props = defineProps<{ volumeId: string; boardId?: string }>();
 const router = useRouter();
 const doc = useDocumentStore();
 const config = useConfigStore();
@@ -41,7 +44,11 @@ const exportedPath = ref<string | null>(null);
 const viewport = useViewport();
 const panning = ref(false);
 
-const boardId = computed(() => Number(props.id));
+const volumeId = computed(() => Number(props.volumeId));
+const boardId = computed(() => (props.boardId ? Number(props.boardId) : null));
+const emptyNaming = ref(false);
+const pages = ref<number[]>([]);
+const pageIndex = computed(() => (boardId.value === null ? -1 : pages.value.indexOf(boardId.value)));
 
 const blocks = computed(() => {
   const opened = doc.document;
@@ -90,13 +97,71 @@ function fitToView(): void {
 }
 
 async function boot(): Promise<void> {
+  const id = boardId.value;
+  if (id === null) {
+    await openFirstPage();
+    return;
+  }
   // 配置与打开笔记互不依赖：并行跑，打开不等配置。
   const configReady = config.snapshot ? Promise.resolve() : config.load();
-  await doc.open(boardId.value);
+  await doc.open(id);
+  await loadPages();
   await nextTick();
   fitToView();
   await configReady;
   doc.usePolicy(config.snapshot?.config.autosave.intervalMs ?? 2000);
+}
+
+/** 进册时没有指定页：有页就落到第一页，没有就留在空态等人新建。 */
+async function openFirstPage(): Promise<void> {
+  try {
+    const pages = await api.pagesInVolume(volumeId.value);
+    const first = pages[0];
+    if (first !== undefined) {
+      await router.replace({
+        name: "volume",
+        params: { volumeId: volumeId.value, boardId: first },
+      });
+    }
+  } catch (error) {
+    importError.value = (error as { message?: string }).message ?? "读不到这一册";
+  }
+}
+
+async function loadPages(): Promise<void> {
+  try {
+    pages.value = await api.pagesInVolume(volumeId.value);
+  } catch {
+    // 页序只是辅助：读不到就不让上移下移可用，画布照常打开。
+    pages.value = [];
+  }
+}
+
+/** 调整这一页在本册里的次序：插入与归并都走这里，只是位置不同。 */
+async function movePage(delta: number): Promise<void> {
+  const from = pageIndex.value;
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= pages.value.length) return;
+  importError.value = null;
+  try {
+    await api.movePageInVolume(volumeId.value, from, to);
+    await loadPages();
+  } catch (error) {
+    importError.value = (error as { message?: string }).message ?? "调整页序失败";
+  }
+}
+
+async function createFirstPage(title: string): Promise<void> {
+  emptyNaming.value = false;
+  try {
+    const created = await api.createPage(title, volumeId.value);
+    await router.replace({
+      name: "volume",
+      params: { volumeId: volumeId.value, boardId: created.board.id },
+    });
+  } catch (error) {
+    importError.value = (error as { message?: string }).message ?? "新建页失败";
+  }
 }
 
 function onWheel(event: WheelEvent): void {
@@ -203,13 +268,13 @@ async function onFiles(event: Event): Promise<void> {
 }
 
 async function exportAs(kind: "container" | "html"): Promise<void> {
+  const id = boardId.value;
+  if (id === null) return;
   importError.value = null;
   exportedPath.value = null;
   try {
     exportedPath.value =
-      kind === "container"
-        ? await api.exportContainer(boardId.value)
-        : await api.exportHtml(boardId.value);
+      kind === "container" ? await api.exportContainer(id) : await api.exportHtml(id);
   } catch (error) {
     importError.value = (error as { message?: string }).message ?? "导出失败";
   }
@@ -453,12 +518,20 @@ watch(
     lastThumbnail = Date.now();
     try {
       const png = await renderThumbnail(doc.document);
-      if (png) await api.saveThumbnail(boardId.value, png);
+      const id = boardId.value;
+      if (png && id !== null) await api.saveThumbnail(id, png);
     } catch {
       // 缩略图失败只影响列表里的预览。
     }
   },
 );
+
+// 换页时先存当前这页，再打开新的一页。
+watch(boardId, async (id, previous) => {
+  if (id === null || id === previous) return;
+  if (doc.dirty) await doc.saveNow();
+  await boot();
+});
 
 onMounted(() => {
   void boot();
@@ -472,12 +545,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AppShell bare>
+  <AppShell :bare="boardId !== null">
     <template #list>
-      <BoardListPane />
+      <PageListPane :volume-id="volumeId" />
     </template>
 
-    <div class="board">
+    <div v-if="boardId !== null" class="board">
     <header class="board__bar island">
       <h1 class="board__title">{{ doc.document?.board.title ?? "笔记" }}</h1>
 
@@ -493,6 +566,19 @@ onBeforeUnmount(() => {
       </button>
       <button class="chip" type="button" :disabled="doc.redoDepth === 0" aria-label="重做" @click="doc.redo()">
         <Redo2 :size="15" :stroke-width="1.75" />
+      </button>
+      <button class="chip" type="button" :disabled="pageIndex <= 0" aria-label="上移这一页" title="上移" @click="movePage(-1)">
+        <ArrowUp :size="15" :stroke-width="1.75" />
+      </button>
+      <button
+        class="chip"
+        type="button"
+        :disabled="pageIndex < 0 || pageIndex >= pages.length - 1"
+        aria-label="下移这一页"
+        title="下移"
+        @click="movePage(1)"
+      >
+        <ArrowDown :size="15" :stroke-width="1.75" />
       </button>
       <button class="chip" type="button" aria-label="导出容器" @click="exportAs('container')">
         <Download :size="15" :stroke-width="1.75" />
@@ -580,6 +666,18 @@ onBeforeUnmount(() => {
       </div>
     </div>
     </div>
+
+    <div v-else class="board__blank">
+      <p class="board__note">这一册还没有页。</p>
+      <BaseInlineField
+        v-if="emptyNaming"
+        placeholder="页名"
+        label="新建页"
+        @submit="createFirstPage"
+        @cancel="emptyNaming = false"
+      />
+      <BaseButton v-else size="sm" @click="emptyNaming = true">新建页</BaseButton>
+    </div>
   </AppShell>
 </template>
 
@@ -590,6 +688,15 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
+}
+
+.board__blank {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
 }
 
 .board__bar {

@@ -140,6 +140,11 @@ export interface VolumeDto {
   pages: number[];
 }
 
+export interface PageCreated {
+  board: BoardSummary;
+  volume: VolumeSummary;
+}
+
 export interface ShelfSummary {
   id: number;
   title: string;

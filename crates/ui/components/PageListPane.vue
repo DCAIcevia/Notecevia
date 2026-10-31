@@ -1,47 +1,56 @@
 <script setup lang="ts">
-// 笔记列表：左边那一栏。搜索、新建、改名、删除都在这里，
-// 选中哪张由路由决定，列表本身不持有选中态。
+// 页列表：当前册的页。新建、改名、删除都在这里，
+// 选中哪一页由路由决定，列表本身不持有选中态。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
-import BaseSearchField from "./base/BaseSearchField.vue";
+import BaseInlineField from "./base/BaseInlineField.vue";
 import BaseSpinner from "./base/BaseSpinner.vue";
 import BaseTextField from "./base/BaseTextField.vue";
-import { Pencil, Trash } from "../icons";
+import { ArrowUpFromLine, Pencil, Trash } from "../icons";
 import { api } from "../api/client";
-import type { BoardSummary, SearchHit } from "../api/types";
+import type { BoardSummary } from "../api/types";
 import { useWorkspaceStore } from "../stores/workspace";
 
+const props = defineProps<{ volumeId: number }>();
 const workspace = useWorkspaceStore();
 const router = useRouter();
 const route = useRoute();
 
 const bootError = ref<string | null>(null);
 const creating = ref(false);
-const query = ref("");
-const hits = ref<SearchHit[]>([]);
-const searching = ref(false);
-const searchError = ref<string | null>(null);
+const naming = ref(false);
 const actionError = ref<string | null>(null);
 const renamingId = ref<number | null>(null);
 const renamingTitle = ref("");
-const refreshInput = ref<HTMLInputElement | null>(null);
+const refreshInput = ref<{ focus: () => void } | null>(null);
+const pages = ref<number[]>([]);
 
 const thumbs = ref(new Map<number, string>());
 const requested = new Set<number>();
 let observer: IntersectionObserver | null = null;
 
-const showingHits = computed(() => query.value.trim().length > 0);
-const selectedId = computed(() => Number(route.params.id ?? 0));
+const selectedId = computed(() => Number(route.params.boardId ?? 0));
+const rows = computed(() => {
+  const byId = new Map(workspace.boards.map((board) => [board.id, board]));
+  return pages.value
+    .map((id) => byId.get(id))
+    .filter((board): board is BoardSummary => board !== undefined);
+});
 
 async function boot(): Promise<void> {
   bootError.value = null;
   try {
     if (!workspace.status) await workspace.open();
     await workspace.refreshBoards();
+    await refreshPages();
   } catch (error) {
     bootError.value = (error as { message?: string }).message ?? "打开工作区失败";
   }
+}
+
+async function refreshPages(): Promise<void> {
+  pages.value = await api.pagesInVolume(props.volumeId);
 }
 
 onMounted(() => {
@@ -85,32 +94,27 @@ function formatTime(seconds: number): string {
   return dayjs(seconds * 1000).format("MM-DD HH:mm");
 }
 
-async function createBoard(): Promise<void> {
-  creating.value = true;
-  try {
-    const board = await api.createBoard("未命名笔记");
-    await workspace.refreshBoards();
-    router.push({ name: "board", params: { id: board.id } });
-  } finally {
-    creating.value = false;
-  }
+function beginCreate(): void {
+  actionError.value = null;
+  naming.value = true;
 }
 
-async function runSearch(value: string): Promise<void> {
-  query.value = value;
-  if (!value.trim()) {
-    hits.value = [];
-    searchError.value = null;
-    return;
-  }
-  searching.value = true;
+async function createPage(title: string): Promise<void> {
+  naming.value = false;
+  creating.value = true;
+  actionError.value = null;
   try {
-    hits.value = await api.searchBoards(value.trim());
-    searchError.value = null;
+    const created = await api.createPage(title, props.volumeId);
+    await workspace.refreshBoards();
+    await refreshPages();
+    await router.push({
+      name: "volume",
+      params: { volumeId: props.volumeId, boardId: created.board.id },
+    });
   } catch (error) {
-    searchError.value = (error as { message?: string }).message ?? "搜索失败";
+    actionError.value = (error as { message?: string }).message ?? "新建页失败";
   } finally {
-    searching.value = false;
+    creating.value = false;
   }
 }
 
@@ -142,6 +146,19 @@ async function commitRename(board: BoardSummary): Promise<void> {
   }
 }
 
+async function detachBoard(board: BoardSummary, event: Event): Promise<void> {
+  event.preventDefault();
+  event.stopPropagation();
+  actionError.value = null;
+  try {
+    await api.unassignPage(board.id);
+    await refreshPages();
+    if (selectedId.value === board.id) await router.push({ name: "home" });
+  } catch (error) {
+    actionError.value = (error as { message?: string }).message ?? "移出失败";
+  }
+}
+
 async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
@@ -149,7 +166,8 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
   try {
     await api.deleteBoard(board.id);
     await workspace.refreshBoards();
-    if (selectedId.value === board.id) router.push({ name: "home" });
+    await refreshPages();
+    if (selectedId.value === board.id) await router.push({ name: "home" });
   } catch (error) {
     actionError.value = (error as { message?: string }).message ?? "删除失败";
   }
@@ -159,10 +177,20 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
 <template>
   <div class="pane">
     <div class="pane__head">
-      <BaseSearchField class="pane__search" placeholder="搜索笔记" @search="runSearch" />
-      <button class="pane__new" type="button" :disabled="creating" aria-label="新建笔记" @click="createBoard">
-        ＋
-      </button>
+      <BaseInlineField
+        v-if="naming"
+        class="pane__naming"
+        placeholder="页名"
+        label="新建页"
+        @submit="createPage"
+        @cancel="naming = false"
+      />
+      <template v-else>
+        <span class="pane__label">页</span>
+        <button class="pane__new" type="button" :disabled="creating" aria-label="新建页" @click="beginCreate">
+          ＋
+        </button>
+      </template>
     </div>
 
     <div class="pane__scroll">
@@ -173,7 +201,7 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
         <button class="pane__retry" type="button" @click="boot">重试</button>
       </div>
 
-      <div v-else-if="workspace.boardsLoading && workspace.boards.length === 0" class="pane__state">
+      <div v-else-if="workspace.boardsLoading && rows.length === 0" class="pane__state">
         <BaseSpinner />
       </div>
 
@@ -181,39 +209,25 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
         <p class="pane__error">{{ workspace.boardsError.message }}</p>
       </template>
 
-      <template v-else-if="showingHits">
-        <p v-if="searchError" class="pane__error">{{ searchError }}</p>
-        <p v-else-if="searching" class="pane__hint">正在搜索</p>
-        <p v-else-if="hits.length === 0" class="pane__hint">没有命中的笔记</p>
-        <RouterLink
-          v-for="hit in hits"
-          :key="hit.boardId"
-          :to="{ name: 'board', params: { id: hit.boardId } }"
-          class="row"
-        >
-          <span class="row__title">{{ hit.title }}</span>
-          <span class="row__meta">{{ hit.snippet }}</span>
-        </RouterLink>
-      </template>
-
-      <p v-else-if="workspace.boards.length === 0" class="pane__hint">还没有笔记，点右上角新建。</p>
+      <p v-else-if="rows.length === 0" class="pane__hint">这一册还没有页，点右上角新建。</p>
 
       <template v-else>
         <BaseTextField
           v-if="renamingId !== null"
+          ref="refreshInput"
           v-model="renamingTitle"
           class="pane__rename"
-          placeholder="笔记名"
-          @keydown.enter.prevent="commitRename(workspace.boards.find((b) => b.id === renamingId)!)"
+          placeholder="页名"
+          @keydown.enter.prevent="commitRename(rows.find((b) => b.id === renamingId)!)"
           @keydown.esc.prevent="cancelRename"
-          @blur="commitRename(workspace.boards.find((b) => b.id === renamingId)!)"
+          @blur="commitRename(rows.find((b) => b.id === renamingId)!)"
         />
 
         <RouterLink
-          v-for="board in workspace.boards"
+          v-for="board in rows"
           :key="board.id"
           :ref="(el) => observeRow(el, board.id)"
-          :to="{ name: 'board', params: { id: board.id } }"
+          :to="{ name: 'volume', params: { volumeId: props.volumeId, boardId: board.id } }"
           class="row"
           :class="{ 'row--active': selectedId === board.id }"
         >
@@ -227,16 +241,25 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
             <button
               class="row__action"
               type="button"
-              aria-label="重命名笔记"
+              aria-label="重命名页"
               title="重命名"
               @click="beginRename(board, $event)"
             >
               <Pencil :size="14" :stroke-width="1.75" />
             </button>
             <button
+              class="row__action"
+              type="button"
+              aria-label="移出这一册"
+              title="移出"
+              @click="detachBoard(board, $event)"
+            >
+              <ArrowUpFromLine :size="14" :stroke-width="1.75" />
+            </button>
+            <button
               class="row__action row__action--danger"
               type="button"
-              aria-label="删除笔记"
+              aria-label="删除页"
               title="删除"
               @click="removeBoard(board, $event)"
             >
@@ -266,14 +289,15 @@ async function removeBoard(board: BoardSummary, event: Event): Promise<void> {
   border-bottom: 1px solid var(--color-line);
 }
 
-.pane__search {
+.pane__label {
   flex: 1;
-  min-width: 0;
+  padding-left: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
-.pane__search :deep(.search) {
-  min-width: 0;
-  width: 100%;
+.pane__naming {
+  flex: 1;
 }
 
 .pane__new {
