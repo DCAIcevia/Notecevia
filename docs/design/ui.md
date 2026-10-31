@@ -68,7 +68,7 @@
 
 | 视图 | 文件 | 内容 |
 | --- | --- | --- |
-| 首页 | `crates/ui/views/HomeView.vue` | 册的封面墙、书架筛选、新建册与新建页、加载与错误态、空态 |
+| 首页 | `crates/ui/views/HomeView.vue` | 册的封面墙与搜索、新建册与新建页、册的改名与删除、书架筛选、加载与错误态 |
 | 册内 | `crates/ui/views/BoardView.vue` | 当前册的页列表与画布、装订与移出、页序、顶栏、工具条、缩放、打开失败重试 |
 | 回收站 | `crates/ui/views/TrashView.vue` | 还原、彻底删除、清空 |
 

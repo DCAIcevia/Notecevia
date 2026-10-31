@@ -76,6 +76,7 @@ export const api = {
   writeMedia: (name: string, data: number[]) => call<string>("write_media", { name, data }),
   listVolumes: () => call<VolumeSummary[]>("list_volumes"),
   loadVolume: (volumeId: number) => call<VolumeDto>("load_volume", { volumeId }),
+  saveVolume: (volumeId: number, volume: VolumeDto) => call<null>("save_volume", { volumeId, volume }),
   createVolume: (title: string) => call<VolumeSummary>("create_volume", { title }),
   createPage: (title: string, volumeId?: number) =>
     call<PageCreated>("create_page", volumeId === undefined ? { title } : { title, volumeId }),

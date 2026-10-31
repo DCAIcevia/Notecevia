@@ -2,18 +2,23 @@
 // 就地命名：创建与改名共用。Enter 提交，Esc 或失焦取消，空名等同于取消。
 import { onMounted, ref } from "vue";
 
-withDefaults(defineProps<{ placeholder?: string; label?: string }>(), {
+const props = withDefaults(defineProps<{ placeholder?: string; label?: string; initial?: string }>(), {
   placeholder: "",
   label: "名称",
+  initial: "",
 });
 
 const emit = defineEmits<{ submit: [value: string]; cancel: [] }>();
 
-const value = ref("");
+const value = ref(props.initial);
 const input = ref<HTMLInputElement | null>(null);
 const settled = ref(false);
 
-onMounted(() => input.value?.focus());
+// 改名时预填并全选，省一次全选操作；新建时是空字符串。
+onMounted(() => {
+  input.value?.focus();
+  input.value?.select();
+});
 
 /** 失焦与非空提交都走这里；已经结算过就不再发第二次。 */
 function commit(): void {
